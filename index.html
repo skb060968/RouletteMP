@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Roulette MP</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Roulette MP — TV + phones party Roulette." />
+    <meta name="theme-color" content="#0d6e3a" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+
+    <!-- ===================== HOME ===================== -->
+    <section id="home" class="screen home-screen" aria-label="Roulette MP home">
+      <header class="home-header">
+        <h1 class="home-title">ROULETTE MULTIPLAYER</h1>
+      </header>
+      <div class="home-buttons">
+        <button id="btn-home-tv" class="btn primary big" type="button">HOST</button>
+        <button id="btn-home-player" class="btn secondary big" type="button">📱 Join as Player</button>
+      </div>
+    </section>
+
+    <!-- ===================== TV CREATE ===================== -->
+    <section id="tv-create" class="screen tv-create-screen" hidden>
+      <h2 class="setup-heading">Host on TV</h2>
+      <button id="btn-tv-create-submit" class="btn primary big" type="button">Create Room</button>
+      <button id="btn-tv-create-back" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <!-- ===================== TV LOBBY ===================== -->
+    <section id="tv-lobby" class="screen tv-lobby-screen" hidden>
+      <header class="tv-lobby-header">
+        <h1 class="tv-title">ROULETTE MULTIPLAYER</h1>
+        <button id="btn-tv-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+      </header>
+      <div class="tv-lobby-body">
+        <div class="tv-lobby-left">
+          <p class="tv-room-label">Room Code</p>
+          <p id="tv-lobby-code" class="tv-room-code">----</p>
+          <div class="tv-lobby-actions">
+            <button id="btn-tv-start-round" class="btn primary big" type="button" disabled>▶ Start Round</button>
+            <button id="btn-tv-lobby-close" class="btn secondary" type="button">Close Room</button>
+          </div>
+        </div>
+        <div class="tv-lobby-right">
+          <h2 class="tv-players-heading">Players <span id="tv-lobby-count" class="tv-players-count">0 / 12</span></h2>
+          <ul id="tv-lobby-players" class="tv-lobby-players"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TV GAME ===================== -->
+    <section id="tv-game" class="screen tv-game-screen" hidden>
+      <header class="tv-game-header">
+        <h1 class="tv-title">ROULETTE MULTIPLAYER</h1>
+      </header>
+
+      <div class="tv-game-body">
+        <div class="tv-wheel-wrap">
+          <div class="tv-wheel-pointer" aria-hidden="true"></div>
+          <div id="tv-wheel" class="tv-wheel" role="img" aria-label="Roulette wheel"></div>
+          <!-- Orbiting ivory ball — animated separately from wheel rotation
+               so it can spin opposite direction and decelerate independently. -->
+          <div id="tv-ball-orbit" class="tv-ball-orbit" aria-hidden="true">
+            <div class="tv-ball"></div>
+          </div>
+          <div id="tv-rien" class="tv-rien">RIEN NE VA PLUS</div>
+          <div id="tv-winning-tag" class="tv-winning-tag"></div>
+        </div>
+      </div>
+
+      <div id="tv-recent" class="tv-recent" aria-label="Recent results"></div>
+
+      <div id="tv-player-strip" class="tv-player-strip" aria-label="Players"></div>
+
+      <div class="tv-controls-row">
+        <button id="btn-tv-open-bets" class="btn primary" type="button">▶ Open Bets</button>
+        <button id="btn-tv-spin" class="btn secondary" type="button">🎲 Spin Now</button>
+        <button id="btn-tv-topup" class="btn secondary" type="button">💸 Top Up Broke</button>
+        <button id="btn-tv-reset" class="btn secondary" type="button">↺ Reset Chips</button>
+        <span id="tv-total-bets" class="tv-total-bets">Table: 0 chips</span>
+        <button id="btn-tv-game-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+        <button id="btn-tv-end" class="btn-end" type="button">✕ End</button>
+      </div>
+    </section>
+
+    <!-- ===================== PHONE JOIN ===================== -->
+    <section id="phone-join" class="screen phone-join-screen" hidden>
+      <h2 class="setup-heading">Join Room</h2>
+      <div class="setup-group">
+        <input id="phone-join-code" class="text-input" type="text" maxlength="4" placeholder="Room Code" autocomplete="off" style="text-transform: uppercase;" />
+      </div>
+      <div class="setup-group">
+        <input id="phone-join-name" class="text-input" type="text" maxlength="14" placeholder="Your Name" autocomplete="off" />
+      </div>
+      <div class="setup-group">
+        <label class="setup-label">Pick an avatar</label>
+        <div class="emoji-picker phone-emoji-picker" role="group">
+          <button class="emoji-btn selected" type="button" data-emoji="🤵">🤵</button>
+          <button class="emoji-btn" type="button" data-emoji="💃">💃</button>
+          <button class="emoji-btn" type="button" data-emoji="🤑">🤑</button>
+          <button class="emoji-btn" type="button" data-emoji="🦊">🦊</button>
+          <button class="emoji-btn" type="button" data-emoji="🐯">🐯</button>
+          <button class="emoji-btn" type="button" data-emoji="🦁">🦁</button>
+        </div>
+      </div>
+      <button id="btn-phone-join-submit" class="btn primary" type="button">Join</button>
+      <button id="btn-phone-join-back" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <!-- ===================== PHONE LOBBY ===================== -->
+    <section id="phone-lobby" class="screen phone-lobby-screen" hidden>
+      <header class="phone-lobby-header">
+        <h2 class="phone-lobby-title">Lobby</h2>
+        <button id="btn-phone-lobby-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+      </header>
+      <p class="phone-room-code-display">Room: <span id="phone-lobby-code">----</span></p>
+      <p class="phone-players-heading">Players <span id="phone-lobby-count" class="phone-players-count">0 / 12</span></p>
+      <ul id="phone-lobby-players" class="phone-lobby-players"></ul>
+      <p class="phone-waiting">Waiting for host to start round…</p>
+      <button id="btn-phone-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+    </section>
+
+    <!-- ===================== PHONE GAME ===================== -->
+    <section id="phone-game" class="screen phone-game-screen" hidden>
+      <div class="phone-player-tag">
+        <span id="phone-player-emoji" class="phone-player-emoji">😀</span>
+        <span id="phone-player-name" class="phone-player-name">Player</span>
+        <span id="phone-player-chips" class="phone-player-chips">💰 1000</span>
+      </div>
+
+      <header class="phone-game-header">
+        <span id="phone-header-status" class="phone-header-status">Waiting…</span>
+        <span id="phone-round" class="phone-round">Round 0</span>
+      </header>
+
+      <div id="phone-bet-board" class="phone-bet-board" aria-label="Betting felt"></div>
+
+      <div class="phone-chip-row" aria-label="Chip denominations">
+        <button class="chip-btn" type="button" data-denom="1">1</button>
+        <button class="chip-btn" type="button" data-denom="5">5</button>
+        <button class="chip-btn selected" type="button" data-denom="25">25</button>
+        <button class="chip-btn" type="button" data-denom="100">100</button>
+        <button id="btn-phone-clear-bets" class="chip-btn clear" type="button">Clear</button>
+      </div>
+
+      <div class="phone-tray-row">
+        <span id="phone-bet-tray" class="phone-bet-tray">Bet: 0 · Balance: 1000</span>
+        <button id="btn-phone-game-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+      </div>
+    </section>
+
+    <!-- Update toast -->
+    <div id="update-toast" class="update-toast" hidden>
+      <span>A new version is available.</span>
+      <button id="update-refresh-btn" type="button">Update</button>
+    </div>
+
+    <!-- Confetti library -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
+      async
+      onerror="
+        var s=document.createElement('script');
+        s.src='https://unpkg.com/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+        s.async=true;
+        document.head.appendChild(s);
+      "
+    ></script>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

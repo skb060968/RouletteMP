@@ -1,0 +1,260 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['positions', 'turnIndex', 'isWin', 'status', 'boardIndex', 'player1Status', 'player2Status', 'updatedAt'])",
+        "positions": {
+          "1": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100" },
+          "2": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100" }
+        },
+        "turnIndex": { ".validate": "newData.isNumber() && (newData.val() === 1 || newData.val() === 2)" },
+        "lastRoll": { ".validate": "newData.val() === null || (newData.isNumber() && newData.val() >= 1 && newData.val() <= 6)" },
+        "isWin": { ".validate": "newData.isBoolean()" },
+        "status": { ".validate": "newData.isString() && (newData.val() === 'waiting' || newData.val() === 'active' || newData.val() === 'reset' || newData.val() === 'opponent_left')" },
+        "boardIndex": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 2" },
+        "player1Status": { ".validate": "newData.isString() && (newData.val() === 'waiting' || newData.val() === 'joined' || newData.val() === 'left')" },
+        "player2Status": { ".validate": "newData.isString() && (newData.val() === 'waiting' || newData.val() === 'joined' || newData.val() === 'left')" },
+        "isBonusTurn": { ".validate": "newData.isBoolean()" },
+        "animationTimestamp": { ".validate": "newData.isNumber()" },
+        "accumulatedSteps": { ".validate": "newData.isNumber()" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "phase": { ".validate": "newData.isString() && (newData.val() === 'dice' || newData.val() === 'move')" },
+        "moveId": { ".validate": "newData.isNumber()" },
+        "roller": { ".validate": "newData.isNumber() && (newData.val() === 1 || newData.val() === 2)" }
+      }
+    },
+    "tambola-rooms": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "meta": {
+          ".validate": "newData.hasChildren(['hostUid', 'hostName', 'status', 'createdAt', 'updatedAt'])",
+          "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'active' || newData.val() === 'ended')" },
+          "hostUid": { ".validate": "newData.isString()" },
+          "hostName": { ".validate": "newData.isString() && newData.val().length <= 12" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "updatedAt": { ".validate": "newData.isNumber()" }
+        },
+        "players": {
+          "$playerId": {
+            ".validate": "newData.hasChildren(['name', 'uid'])",
+            "name": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          }
+        },
+        "tickets": {
+          "$playerId": { ".validate": "newData.isString()" }
+        },
+        "game": {
+          "drawnNumbers": { ".validate": true },
+          "currentNumber": { ".validate": "newData.val() === null || (newData.isNumber() && newData.val() >= 1 && newData.val() <= 90)" },
+          "drawIndex": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 90" },
+          "claims": {
+            "$pattern": {
+              "won": { ".validate": "newData.isBoolean()" },
+              "winner": { ".validate": "newData.isNumber() || newData.val() === null" },
+              "wonAt": { ".validate": "newData.isNumber()" }
+            }
+          }
+        },
+        "marks": {
+          "$playerId": { ".validate": true }
+        }
+      }
+    },
+    "ppp-rooms": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "meta": {
+          "hostUid": { ".validate": "newData.isString()" },
+          "hostName": { ".validate": "newData.isString() && newData.val().length <= 12" },
+          "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'active' || newData.val() === 'ended')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "lastActivity": { ".validate": "newData.isNumber()" },
+          "deckCount": { ".validate": "newData.isNumber() && (newData.val() === 1 || newData.val() === 2)" }
+        },
+        "players": {
+          "$playerId": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          }
+        },
+        "game": { ".validate": true },
+        "lastMove": { ".validate": true },
+        "ready": { ".validate": true }
+      }
+    },
+    "card-games": {
+      "$gameRooms": {
+        "$roomCode": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "meta": {
+            "hostUid": { ".validate": "newData.isString()" },
+            "hostName": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'active' || newData.val() === 'ended')" },
+            "createdAt": { ".validate": "newData.isNumber()" },
+            "lastActivity": { ".validate": "newData.isNumber()" },
+            "deckCount": { ".validate": "newData.isNumber() && (newData.val() === 1 || newData.val() === 2)" }
+          },
+          "players": {
+            "$playerId": {
+              "name": { ".validate": "newData.isString() && newData.val().length <= 12" },
+              "emoji": { ".validate": "newData.isString()" },
+              "uid": { ".validate": "newData.isString()" },
+              "connected": { ".validate": "newData.isBoolean()" }
+            }
+          },
+          "game": { ".validate": true },
+          "lastMove": { ".validate": true },
+          "ready": { ".validate": true }
+        }
+      }
+    },
+    "snl-rooms": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "meta": {
+          "hostUid": { ".validate": "newData.isString()" },
+          "hostName": { ".validate": "newData.isString() && newData.val().length <= 12" },
+          "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'active' || newData.val() === 'ended')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "lastActivity": { ".validate": "newData.isNumber()" }
+        },
+        "players": {
+          "$playerId": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 12" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          }
+        },
+        "game": { ".validate": true },
+        "lastMove": { ".validate": true },
+        "ready": { ".validate": true }
+      }
+    },
+    "tambola-mp-rooms": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "meta": {
+          "host": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 14" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          },
+          "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'active' || newData.val() === 'ended')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "updatedAt": { ".validate": "newData.isNumber()" }
+        },
+        "players": {
+          "$playerId": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 14" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          }
+        },
+        "tickets": {
+          "$playerId": { ".validate": "newData.isString()" }
+        },
+        "game": {
+          "drawnNumbers": { ".validate": true },
+          "currentNumber": { ".validate": "newData.val() === null || (newData.isNumber() && newData.val() >= 1 && newData.val() <= 90)" },
+          "drawIndex": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 90" },
+          "autoCallSpeed": { ".validate": "newData.val() === null || newData.isNumber()" },
+          "paused": { ".validate": "newData.isBoolean()" },
+          "claims": {
+            "$pattern": {
+              "won": { ".validate": "newData.isBoolean()" },
+              "winner": { ".validate": "newData.isNumber() || newData.val() === null" },
+              "wonAt": { ".validate": "newData.isNumber()" },
+              "playerName": { ".validate": "newData.isString()" },
+              "patternLabel": { ".validate": "newData.isString()" }
+            }
+          }
+        },
+        "marks": {
+          "$playerId": { ".validate": true }
+        },
+        "claimRequests": {
+          "$requestId": {
+            "pattern": { ".validate": "newData.isString()" },
+            "playerIndex": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 19" },
+            "ts": { ".validate": "newData.isNumber()" }
+          }
+        },
+        "claimResults": {
+          "$requestId": {
+            "valid": { ".validate": "newData.isBoolean()" },
+            "reason": { ".validate": "newData.isString()" }
+          }
+        },
+        "ready": { ".validate": true }
+      }
+    },
+    "roulette-rooms": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "meta": {
+          "host": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 14" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" }
+          },
+          "status": { ".validate": "newData.isString() && (newData.val() === 'lobby' || newData.val() === 'betting' || newData.val() === 'spinning' || newData.val() === 'payout' || newData.val() === 'ended')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "updatedAt": { ".validate": "newData.isNumber()" }
+        },
+        "players": {
+          "$playerId": {
+            "name": { ".validate": "newData.isString() && newData.val().length <= 14" },
+            "emoji": { ".validate": "newData.isString()" },
+            "uid": { ".validate": "newData.isString()" },
+            "connected": { ".validate": "newData.isBoolean()" },
+            "chips": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "broke": { ".validate": "newData.isBoolean()" }
+          }
+        },
+        "bets": {
+          "$playerId": {
+            "$betKey": {
+              "type": { ".validate": "newData.isString()" },
+              "target": { ".validate": "newData.val() === null || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 36)" },
+              "chips": { ".validate": "newData.isNumber() && newData.val() >= 0" }
+            }
+          }
+        },
+        "wheel": {
+          "spinning": { ".validate": "newData.isBoolean()" },
+          "winningNumber": { ".validate": "newData.val() === null || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 36)" },
+          "spinStartedAt": { ".validate": "newData.isNumber()" }
+        },
+        "game": {
+          "roundNumber": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "betsCloseAt": { ".validate": "newData.val() === null || newData.isNumber()" },
+          "autoCloseSeconds": { ".validate": "newData.val() === null || newData.isNumber()" },
+          "lastResults": { ".validate": true }
+        },
+        "payouts": {
+          "$playerId": {
+            "wonChips": { ".validate": "newData.isNumber()" },
+            "betAmount": { ".validate": "newData.isNumber()" },
+            "netDelta": { ".validate": "newData.isNumber()" }
+          }
+        }
+      }
+    }
+  }
+}

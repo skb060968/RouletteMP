@@ -1,0 +1,19 @@
+{
+  "name": "roulette-mp",
+  "version": "1.0.0",
+  "description": "Roulette MP — TV + phones party Roulette. Big screen runs the wheel, phones place bets.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^12.9.0"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  },
+  "keywords": ["roulette", "casino", "party", "tv", "multiplayer", "firebase", "pwa"],
+  "license": "MIT"
+}
