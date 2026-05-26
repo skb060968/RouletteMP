@@ -271,7 +271,8 @@ function renderPhoneLobby() {
   const list = document.getElementById('phone-lobby-players');
   if (!list) return;
   const players = firebaseSnapshot.players || {};
-  const keys = Object.keys(players).sort();
+  // Skip ghost slots (see firebase-sync joinRoomAsPlayer for context).
+  const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
   list.innerHTML = '';
   keys.forEach((k) => {
     const p = players[k] || {};

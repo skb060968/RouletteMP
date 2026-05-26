@@ -144,7 +144,10 @@ function renderLobbyUi() {
   const list = document.getElementById('tv-lobby-players');
   if (!list) return;
   const players = firebaseSnapshot.players || {};
-  const keys = Object.keys(players).sort();
+  // Skip ghost slots (no name) — these can be left behind by a stale
+  // onDisconnect after a player tapped Leave; they get cleaned up on the
+  // next join, but we filter here so they don't render in the meantime.
+  const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
   list.innerHTML = '';
   if (keys.length === 0) {
     const empty = document.createElement('li');
@@ -588,7 +591,8 @@ function renderPlayerStrip() {
   const right = document.getElementById('tv-players-right');
   if (!left || !right) return;
   const players = firebaseSnapshot.players || {};
-  const keys = Object.keys(players).sort();
+  // Skip ghost slots (see renderLobbyUi for context).
+  const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
   const half = Math.ceil(keys.length / 2);
 
   const renderInto = (el, slice) => {
