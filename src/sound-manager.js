@@ -3,6 +3,12 @@
  *
  * AudioContext-first with HTML Audio fallback.
  * Mute toggle persisted in localStorage.
+ *
+ * iOS / iPad notes:
+ *   - AudioContext can be suspended after inactivity. We resume on every
+ *     user gesture and kick a silent buffer to keep it alive.
+ *   - Pre-warmed HTML <audio> elements (created during a real gesture) are
+ *     iOS's most reliable fallback when the AudioContext is busy/suspended.
  */
 
 const SOUND_FILES = {
@@ -17,7 +23,10 @@ const MUTE_KEY = 'roulette_mp_muted';
 
 let audioCtx = null;
 const soundBuffers = {};
+/** Pre-warmed HTML audio elements (created on first gesture). */
+const audioEls = {};
 let initialized = false;
+let warmedHtmlAudio = false;
 let silentBuffer = null;
 
 function getAudioContext() {
@@ -59,6 +68,21 @@ function preloadSounds() {
   });
 }
 
+/** Pre-create HTML <audio> elements during a real user gesture so iOS
+ *  treats them as authorised and they remain playable as a fallback. */
+function warmHtmlAudio() {
+  if (warmedHtmlAudio) return;
+  warmedHtmlAudio = true;
+  Object.entries(SOUND_FILES).forEach(([name, url]) => {
+    try {
+      const a = new Audio(url);
+      a.preload = 'auto';
+      a.load();
+      audioEls[name] = a;
+    } catch (_) {}
+  });
+}
+
 export function initAudio() {
   getAudioContext();
   if (!initialized) preloadSounds();
@@ -70,6 +94,7 @@ export function initAudio() {
       }
       kickSilent();
     }
+    warmHtmlAudio();
     if (!initialized) {
       initialized = true;
       preloadSounds();
@@ -105,6 +130,7 @@ export function playSound(name, volume = 1.0) {
   if (ctx && ctx.state === 'suspended') {
     try { ctx.resume(); } catch (_) {}
   }
+  // Path 1: AudioContext buffer source (best quality, lowest latency)
   if (ctx && ctx.state === 'running' && soundBuffers[name]) {
     try {
       const src = ctx.createBufferSource();
@@ -117,6 +143,18 @@ export function playSound(name, volume = 1.0) {
       return;
     } catch (_) {}
   }
+  // Path 2: pre-warmed HTML <audio> element (survives ctx suspension on iOS)
+  const warmed = audioEls[name];
+  if (warmed) {
+    try {
+      warmed.currentTime = 0;
+      warmed.volume = volume;
+      const p = warmed.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+      return;
+    } catch (_) {}
+  }
+  // Path 3: fresh Audio element (last resort)
   try {
     const a = new Audio(url);
     a.volume = volume;

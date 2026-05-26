@@ -389,11 +389,16 @@ async function onSpinSettled(winningNumber) {
 
   // Reveal + payout
   await revealWinningNumber(roomCode, winningNumber);
-  playSound('win');
 
   const players = firebaseSnapshot.players || {};
   const bets = firebaseSnapshot.bets || {};
   const { newBalances, newBroke, payouts } = resolveRound(bets, players, winningNumber);
+
+  // Only celebrate with a win chime if at least one player actually won.
+  // Otherwise the round end is silent on TV — players' phones will
+  // celebrate themselves via their own win toast + sound.
+  const anyoneWon = Object.values(payouts).some((p) => (p?.netDelta || 0) > 0);
+  if (anyoneWon) playSound('win');
 
   // Build a single update bundle
   const updates = {};
