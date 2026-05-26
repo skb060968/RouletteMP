@@ -12,7 +12,7 @@ import {
   writeBet, clearPlayerBets, leaveRoom, rejoinRoom,
   MAX_PLAYERS,
 } from './firebase-sync.js';
-import { BET_TYPES, betKey, payoutMultiplier } from './bet-validator.js';
+import { BET_TYPES, betKey, payoutMultiplier, resolveBets } from './bet-validator.js';
 import { colorOf } from './wheel.js';
 import { totalCommitted } from './game-engine.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
@@ -29,6 +29,12 @@ let selectedDenom = 25;
 /** Local pending bets — keyed by betKey, value is the chip count. Mirrors
  *  what's written to Firebase but allows instant UI feedback before round-trip. */
 let localBets = {};
+/** Snapshot of bets taken at spin time so the result panel can keep showing
+ *  what the player wagered even after lobby/round reset wipes localBets. */
+let lastRoundBets = {};
+/** Snapshot of full bet objects {type, target, chips} so we can reuse the
+ *  bet-validator's resolveBets() to compute per-bet outcome on the phone. */
+let lastRoundBetObjects = [];
 /** Debounced bet-write timers keyed by betKey. */
 const _betWriteTimers = new Map();
 
@@ -130,19 +136,31 @@ function attachRoomListener() {
       if (status === 'lobby') {
         // Round just reset — clear local bet state
         localBets = {};
+        lastRoundBets = {};
+        lastRoundBetObjects = [];
         showScreen('phone-lobby');
         renderPhoneLobby();
       } else if (status === 'betting') {
+        // New round opened — clear last round's snapshot so the result panel
+        // hides and the bet board takes over again.
+        lastRoundBets = {};
+        lastRoundBetObjects = [];
         showScreen('phone-game');
         renderBetBoard();
+        renderResultPanel();
         renderHeader();
         startCountdownDisplay();
       } else if (status === 'spinning') {
+        // Snapshot bets the moment betting closes — Firebase may clear them
+        // before the result phase finishes rendering.
+        snapshotLastRoundBets();
         renderHeader();
         renderBetBoard(); // disabled overlay
+        renderResultPanel();
       } else if (status === 'payout') {
         renderHeader();
         renderBetBoard();
+        renderResultPanel();
       } else if (status === 'ended') {
         showToast('Host closed the room.');
         cleanupAndGoHome();
@@ -186,6 +204,7 @@ function attachRoomListener() {
     onWheelChange: (wheel) => {
       firebaseSnapshot.wheel = wheel;
       renderHeader();
+      renderResultPanel();
     },
     onGameChange: (game) => {
       firebaseSnapshot.game = game;
@@ -193,6 +212,7 @@ function attachRoomListener() {
     },
     onPayoutsChange: (payouts) => {
       firebaseSnapshot.payouts = payouts;
+      renderResultPanel();
       // Show "you won X" toast on payout — winner only celebrates with
       // confetti + win sound; loser hears a soft error chime; player
       // who just went broke gets a louder error to mark the moment.
@@ -206,9 +226,8 @@ function attachRoomListener() {
             playSound('win');
             burstPhoneConfetti();
           } else if (my.netDelta < 0) {
-            showToast(`Lost ${-my.netDelta} chips`, 1600);
-            // If this loss took them to broke, mark it with the error
-            // chime — softer if just a regular loss with no error.
+            // Result panel below shows the loss in detail; only flag the
+            // moment a player actually goes broke with the louder error.
             const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
             if (me && (me.broke || (me.chips ?? 0) <= 0)) {
               playSound('error', 0.7);
@@ -480,21 +499,157 @@ function renderBetBoard() {
     const balance = me?.chips ?? 0;
     const total = totalLocal();
     // Itemized ledger: short label per bet + chip count, plus total/balance
-    // pinned to the right. Empty state shows just the balance.
+    // pinned to the right. Empty state shows just the balance. The bet count
+    // pill shows N bets at a glance so the player always knows their action.
     const items = [];
+    let count = 0;
     Object.keys(localBets).forEach((k) => {
       const chips = localBets[k];
       if (!chips) return;
+      count += 1;
       items.push(`<span class="ledger-item">${labelForBetKey(k)} <strong>${chips}</strong></span>`);
     });
     if (items.length === 0) {
       tray.innerHTML = `<span class="ledger-balance">💰 ${balance}</span>`;
     } else {
       tray.innerHTML = `
+        <span class="ledger-count">${count} bet${count === 1 ? '' : 's'}</span>
         <span class="ledger-items">${items.join('')}</span>
         <span class="ledger-summary">Bet ${total} · Left ${balance - total}</span>`;
     }
   }
+}
+
+/** Snapshots local bets to a parallel store so the result panel can keep
+ *  showing them after the round transitions or Firebase clears them. Called
+ *  the moment the meta status flips to 'spinning'. */
+function snapshotLastRoundBets() {
+  lastRoundBets = { ...localBets };
+  // Also keep the full bet objects so resolveBets() can compute outcomes.
+  lastRoundBetObjects = [];
+  Object.keys(lastRoundBets).forEach((k) => {
+    const chips = lastRoundBets[k];
+    if (!chips) return;
+    const { type, target } = parseBetKey(k);
+    if (type) lastRoundBetObjects.push({ type, target, chips });
+  });
+}
+
+/** Reverses betKey() — returns {type, target} for a stored bet key. */
+function parseBetKey(key) {
+  if (key.startsWith('s-')) return { type: BET_TYPES.STRAIGHT, target: parseInt(key.slice(2), 10) };
+  if (key.startsWith('d-')) return { type: BET_TYPES.DOZEN,    target: parseInt(key.slice(2), 10) };
+  if (key.startsWith('c-')) return { type: BET_TYPES.COLUMN,   target: parseInt(key.slice(2), 10) };
+  switch (key) {
+    case 'red':   return { type: BET_TYPES.RED,   target: null };
+    case 'black': return { type: BET_TYPES.BLACK, target: null };
+    case 'even':  return { type: BET_TYPES.EVEN,  target: null };
+    case 'odd':   return { type: BET_TYPES.ODD,   target: null };
+    case 'low':   return { type: BET_TYPES.LOW,   target: null };
+    case 'high':  return { type: BET_TYPES.HIGH,  target: null };
+    default:      return { type: null, target: null };
+  }
+}
+
+/**
+ * Result panel — shown during spinning + payout phases. Lists every bet the
+ * player placed for this round, marks each as won/lost with chips returned,
+ * and totals up the net outcome. Hidden during betting and lobby phases (the
+ * bet board takes the foreground then).
+ */
+function renderResultPanel() {
+  const panel = document.getElementById('phone-result-panel');
+  const board = document.getElementById('phone-bet-board');
+  if (!panel || !board) return;
+
+  const status = firebaseSnapshot.meta?.status;
+  const isResultPhase = (status === 'spinning' || status === 'payout');
+  // No round to show — hide and restore the bet board.
+  if (!isResultPhase || lastRoundBetObjects.length === 0) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    board.hidden = false;
+    return;
+  }
+
+  // Show the panel instead of the board for the duration of the round result.
+  panel.hidden = false;
+  board.hidden = true;
+
+  const win = firebaseSnapshot.wheel?.winningNumber;
+  const totalStaked = lastRoundBetObjects.reduce((s, b) => s + b.chips, 0);
+
+  // Header: spin in progress vs settled result.
+  let headerHtml;
+  if (status === 'spinning' || win == null) {
+    headerHtml = `
+      <div class="rp-header rp-spinning">
+        <span class="rp-title">Wheel Spinning…</span>
+        <span class="rp-sub">${lastRoundBetObjects.length} bet${lastRoundBetObjects.length === 1 ? '' : 's'} · staked ${totalStaked}</span>
+      </div>`;
+  } else {
+    const c = colorOf(win);
+    headerHtml = `
+      <div class="rp-header rp-settled">
+        <span class="rp-result-label">Winning Number</span>
+        <span class="rp-result-num ${c}">${win}</span>
+        <span class="rp-result-color ${c}">${c.toUpperCase()}</span>
+      </div>`;
+  }
+
+  // Per-bet outcome list. During spin we don't know the result yet, so we
+  // just list bets with their stake. After reveal we mark won/lost and show
+  // chips returned.
+  const itemsHtml = lastRoundBetObjects.map((b) => {
+    const label = labelForBetKey(betKey(b.type, b.target));
+    if (status === 'spinning' || win == null) {
+      return `<li class="rp-bet rp-pending">
+        <span class="rp-bet-label">${label}</span>
+        <span class="rp-bet-stake">${b.chips}</span>
+      </li>`;
+    }
+    const won = (function () {
+      const r = resolveBets([b], win);
+      return r.totalReturn > 0;
+    })();
+    const returned = won ? b.chips * (payoutMultiplier(b.type) + 1) : 0;
+    const profit   = won ? (returned - b.chips) : -b.chips;
+    return `<li class="rp-bet ${won ? 'won' : 'lost'}">
+      <span class="rp-bet-label">${label}</span>
+      <span class="rp-bet-stake">${b.chips}</span>
+      <span class="rp-bet-outcome">${won ? `+${profit}` : `−${b.chips}`}</span>
+    </li>`;
+  }).join('');
+
+  // Footer: net delta from this round (server is authoritative once payouts
+  // arrive — fall back to local computation while spinning).
+  let footerHtml = '';
+  if (status === 'payout' && win != null) {
+    const myPayout = (firebaseSnapshot.payouts || {})[`player_${playerIndex}`];
+    const net = myPayout?.netDelta ?? 0;
+    const cls = net > 0 ? 'won' : net < 0 ? 'lost' : 'flat';
+    const sign = net > 0 ? '+' : net < 0 ? '−' : '';
+    const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
+    const balance = me?.chips ?? 0;
+    footerHtml = `
+      <div class="rp-footer ${cls}">
+        <span class="rp-net-label">Round Net</span>
+        <span class="rp-net-value">${sign}${Math.abs(net)}</span>
+        <span class="rp-balance">Balance: ${balance}</span>
+      </div>
+      <div class="rp-next">Next round opening soon…</div>`;
+  } else {
+    footerHtml = `
+      <div class="rp-footer flat">
+        <span class="rp-net-label">Total Staked</span>
+        <span class="rp-net-value">${totalStaked}</span>
+      </div>`;
+  }
+
+  panel.innerHTML = `
+    ${headerHtml}
+    <ul class="rp-bet-list">${itemsHtml}</ul>
+    ${footerHtml}`;
 }
 
 /** Short human label for a bet key — used in the bet ledger on phone. */
@@ -613,6 +768,8 @@ function cleanupAndGoHome() {
   playerIndex = null;
   firebaseSnapshot = {};
   localBets = {};
+  lastRoundBets = {};
+  lastRoundBetObjects = [];
   delete document.body.dataset.mode;
   showScreen('home');
 }

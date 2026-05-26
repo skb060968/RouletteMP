@@ -331,12 +331,12 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   /* Soft cast shadow under the wheel — feels like dim casino lighting. */
   content: '';
   position: absolute;
-  bottom: -3%;
-  left: 5%;
-  right: 5%;
-  height: 10%;
-  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55), transparent 70%);
-  filter: blur(4px);
+  bottom: -6%;
+  left: 3%;
+  right: 3%;
+  height: 14%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.7), transparent 70%);
+  filter: blur(8px);
   z-index: 0;
 }
 .tv-wheel {
@@ -345,23 +345,45 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   border-radius: 50%;
   transform: rotateX(14deg);
   transform-style: preserve-3d;
-  /* Layered metallic gold rim:
-   *   - inner ring of brushed gold (top-lit)
-   *   - mid shadow band (under-lit)
-   *   - outer specular highlight at the top */
+  /* Layered metallic gold rim — multiple alternating bright/dark inset rings
+   * read as a turned brass bezel with real thickness. The big offset drop
+   * shadow gives the wheel a sense of body sitting above the table. */
   box-shadow:
-    /* Outer drop shadow on the table */
-    0 18px 36px rgba(0, 0, 0, 0.65),
-    /* Outer gold rim */
-    inset 0 0 0 4px #2a1f08,
-    inset 0 0 0 8px #ffd966,
-    inset 0 0 0 12px #c69511,
-    inset 0 0 0 14px #6a4d04,
-    /* Inner highlight ring just inside the rim */
-    inset 0 0 0 16px #ffd966,
-    inset 0 8px 16px rgba(255, 240, 200, 0.18),
-    inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+    /* Cast shadow on the table — tall offset sells thickness */
+    0 28px 56px rgba(0, 0, 0, 0.75),
+    0 8px 16px rgba(0, 0, 0, 0.55),
+    /* Outer gold rim — multiple alternating rings = turned brass */
+    inset 0 0 0 3px #2a1f08,
+    inset 0 0 0 6px #ffe27a,
+    inset 0 0 0 9px #c69511,
+    inset 0 0 0 12px #6a4d04,
+    inset 0 0 0 14px #ffd966,
+    inset 0 0 0 17px #8a6a13,
+    inset 0 0 0 19px #c69511,
+    inset 0 0 0 21px #3a2800,
+    /* Bowl effect — light from top, shadow at bottom = dished face */
+    inset 0 14px 28px rgba(255, 240, 200, 0.22),
+    inset 0 -18px 36px rgba(0, 0, 0, 0.55),
+    inset 0 0 60px rgba(0, 0, 0, 0.35);
   background: #1a1a1a;
+}
+/* Recessed ball track — the depression where the ball circulates between
+ * the rim and the numbered segments. Sits on top of the SVG so the numbers
+ * still show through, but its dark inner edge + bright outer highlight reads
+ * as a real groove in the metal. */
+.tv-wheel::before {
+  content: '';
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  box-shadow:
+    /* Outer bright rim of the track */
+    inset 0 0 0 2px rgba(255, 230, 150, 0.55),
+    /* Inner recess shadow — deepest at the bottom, sells "dropped in" */
+    inset 0 6px 14px rgba(0, 0, 0, 0.55),
+    inset 0 -3px 8px rgba(255, 240, 200, 0.18);
 }
 /* Glassy sheen overlay — soft white highlight from the top-left. */
 .tv-wheel::after {
@@ -369,9 +391,12 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   position: absolute;
   inset: 6%;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.25), transparent 50%);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.28), transparent 45%),
+    radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.25), transparent 55%);
   pointer-events: none;
   z-index: 5;
+  mix-blend-mode: screen;
 }
 .wheel-svg { width: 100%; height: 100%; display: block; position: relative; z-index: 2; }
 
@@ -527,30 +552,6 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
 }
 
-.tv-recent {
-  flex-shrink: 0;
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  flex-wrap: wrap;
-  padding: 6px;
-}
-.recent-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  font-weight: 800;
-  font-size: 0.9rem;
-  color: #fff;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-}
-.recent-chip.red { background: #c0392b; }
-.recent-chip.black { background: #1a1a1a; }
-.recent-chip.green { background: #27ae60; }
-.recent-empty { opacity: 0.5; font-style: italic; }
-
 .tv-player-strip {
   flex-shrink: 0;
   display: grid;
@@ -703,35 +704,56 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   position: relative;
   width: 100%;
   max-width: 480px;
-  /* Layered casino felt: base green + a faint noise pattern via repeating
-   * conic gradient at very low opacity for fibre texture. */
+  /* Casino felt: deeper green base + cross-weave fibre + edge vignette so it
+   * reads like a real table under spotlight rather than a flat green panel. */
   background:
-    repeating-conic-gradient(rgba(255,255,255,0.012) 0% 0.5%, transparent 0.5% 1%),
-    radial-gradient(ellipse at 30% 20%, rgba(255, 255, 255, 0.05), transparent 60%),
-    linear-gradient(135deg, #0e6a37, #08471f);
+    repeating-linear-gradient(45deg, rgba(0,0,0,0.06) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(-45deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 50% 50%, #0c5e30 0%, #073d1c 75%, #052914 100%);
   border-radius: 12px;
-  padding: 8px;
-  /* Wooden table-edge: thick brown border + gold pinstripe via inset shadows. */
-  border: 6px solid #4a2e15;
+  padding: 10px;
+  /* Mahogany rail — real casino tables have dark polished wood with a gold
+   * pinstripe inlay. Multiple inset rings build that bevelled look. */
+  border: 7px solid #2e1a08;
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.6),
-    inset 0 0 0 2px #8b6914,
+    /* Cast shadow on the floor */
+    0 10px 28px rgba(0, 0, 0, 0.7),
+    /* Polished wood highlight */
+    inset 0 0 0 1px #6b3a14,
+    inset 0 0 0 3px #a06a2c,
     inset 0 0 0 4px #ffd700,
     inset 0 0 0 5px #6b4d04,
-    inset 0 0 24px rgba(0, 0, 0, 0.4);
+    inset 0 0 0 6px #2e1a08,
+    /* Felt vignette — darker corners */
+    inset 0 0 60px rgba(0, 0, 0, 0.55),
+    inset 0 4px 12px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
   gap: 4px;
+  font-family: 'Cinzel', serif;
 }
 .phone-bet-board.locked { filter: brightness(0.65); }
 
 .felt-row { display: flex; gap: 4px; }
 .felt-row-numbers { display: flex; gap: 4px; align-items: stretch; }
 
+/* Common cell traits — every cell on a real layout has a thin white
+ * pinstripe outline and is "stamped into" the felt (inset shadow). */
+.felt-cell {
+  outline: 1.5px solid rgba(255, 255, 255, 0.7);
+  outline-offset: -2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.3),
+    inset 0 2px 3px rgba(0, 0, 0, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+}
+
 .felt-zero {
-  background: #27ae60;
+  background: linear-gradient(180deg, #2bc16f, #186e3a);
   color: #fff;
   font-weight: 800;
+  font-size: 1.6rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -741,7 +763,6 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   cursor: pointer;
   user-select: none;
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .felt-numbers {
@@ -751,6 +772,10 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   grid-auto-flow: column;
   gap: 2px;
   flex: 1;
+  /* Wrap the numbers grid in its own pinstripe frame. */
+  outline: 1px solid rgba(255, 255, 255, 0.4);
+  outline-offset: -1px;
+  border-radius: 4px;
 }
 .felt-num {
   background: #1a1a1a;
@@ -759,18 +784,16 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   user-select: none;
   position: relative;
-  font-size: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  /* Embossed look: highlight on top, shadow on bottom. */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+  font-size: 0.85rem;
+  font-family: 'Cinzel', serif;
   transition: transform 0.1s, filter 0.1s;
 }
-.felt-num.red { background: linear-gradient(180deg, #d04535, #952a1f); }
-.felt-num.black { background: linear-gradient(180deg, #2c2c2c, #0a0a0a); }
+.felt-num.red { background: linear-gradient(180deg, #d04535, #7d1f15); }
+.felt-num.black { background: linear-gradient(180deg, #2c2c2c, #050505); }
 
 .felt-columns {
   display: grid;
@@ -779,10 +802,10 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   width: 9%;
 }
 .felt-col {
-  background: rgba(255, 215, 0, 0.18);
-  color: #ffd700;
+  background: linear-gradient(180deg, #0c5e30, #073d1c);
+  color: #fff;
   font-weight: 800;
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -790,7 +813,6 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   cursor: pointer;
   user-select: none;
   position: relative;
-  border: 1px solid rgba(255, 215, 0, 0.4);
 }
 
 .felt-row-dozens, .felt-row-outside {
@@ -800,35 +822,56 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
 .felt-row-dozens { grid-template-columns: repeat(3, 1fr); }
 .felt-row-outside { grid-template-columns: repeat(6, 1fr); }
 .felt-dozen {
-  background: rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, #0c5e30, #073d1c);
   color: #fff;
   font-weight: 800;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
   text-align: center;
-  padding: 10px 4px;
+  padding: 12px 4px;
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 .felt-outside {
-  background: rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, #0c5e30, #073d1c);
   color: #fff;
   font-weight: 800;
   font-size: 0.7rem;
+  letter-spacing: 0.04em;
   text-align: center;
-  padding: 10px 2px;
+  padding: 12px 2px;
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.15);
 }
-.felt-outside.red { background: #c0392b; }
-.felt-outside.black { background: #1a1a1a; }
-
-.felt-cell.has-bet { box-shadow: 0 0 0 2px #ffd700, 0 4px 8px rgba(255, 215, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+/* Real casino layouts use red/black diamonds, not flat colored cells.
+ * Approximation: keep the green felt base, draw a colored diamond inside. */
+.felt-outside.red, .felt-outside.black {
+  color: transparent;            /* hide the text label */
+  position: relative;
+}
+.felt-outside.red::before,
+.felt-outside.black::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 60%; aspect-ratio: 1;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.felt-outside.red::before { background: linear-gradient(180deg, #d04535, #7d1f15); }
+.felt-outside.black::before { background: linear-gradient(180deg, #2c2c2c, #050505); }
+.felt-cell.has-bet {
+  box-shadow:
+    0 0 0 2px #ffd700,
+    0 4px 8px rgba(255, 215, 0, 0.4),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.3),
+    inset 0 2px 3px rgba(0, 0, 0, 0.45);
+}
 
 /* Press animation when the player taps a cell — momentary shrink + sound. */
 .felt-cell.press {
@@ -939,6 +982,18 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   align-items: center;
 }
 .ledger-balance { font-size: 1rem; }
+.ledger-count {
+  background: linear-gradient(180deg, #ffd700, #c9a200);
+  color: #2c1810;
+  font-family: 'Cinzel', serif;
+  font-weight: 800;
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #6b4d04;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
 .ledger-items {
   display: flex;
   flex-wrap: wrap;
@@ -958,6 +1013,189 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   font-size: 0.75rem;
   color: #ffd700;
   white-space: nowrap;
+}
+
+/* ======= ROUND RESULT PANEL =======
+ * Replaces the bet board during the spin + reveal so the player can read
+ * back exactly what they staked and how each bet settled. */
+.phone-result-panel {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 215, 0, 0.12), transparent 60%),
+    linear-gradient(180deg, #1c1408, #0a0604);
+  border-radius: 12px;
+  padding: 14px;
+  border: 4px solid #2e1a08;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.7),
+    inset 0 0 0 1px #6b3a14,
+    inset 0 0 0 2px #ffd700,
+    inset 0 0 0 3px #6b4d04,
+    inset 0 0 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Cinzel', serif;
+  color: #f4e4b6;
+}
+
+.rp-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+}
+.rp-spinning .rp-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #ffd700;
+  font-style: italic;
+  letter-spacing: 0.06em;
+}
+.rp-spinning .rp-sub {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  font-family: 'Courier New', monospace;
+}
+.rp-settled { gap: 6px; }
+.rp-result-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+.rp-result-num {
+  font-family: 'Cinzel', serif;
+  font-weight: 800;
+  font-size: 3rem;
+  line-height: 1;
+  padding: 4px 18px;
+  border-radius: 10px;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2), 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+.rp-result-num.red   { background: linear-gradient(180deg, #d04535, #7d1f15); }
+.rp-result-num.black { background: linear-gradient(180deg, #2c2c2c, #050505); }
+.rp-result-num.green { background: linear-gradient(180deg, #2bc16f, #186e3a); }
+.rp-result-color {
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+.rp-result-color.red   { color: #ff7a6b; }
+.rp-result-color.black { color: #c9c9c9; }
+.rp-result-color.green { color: #2bc16f; }
+
+.rp-bet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 38vh;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+}
+.rp-bet {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid rgba(255, 215, 0, 0.3);
+  font-size: 0.85rem;
+}
+.rp-bet.won {
+  border-left-color: #2bc16f;
+  background: rgba(43, 193, 111, 0.1);
+}
+.rp-bet.lost {
+  border-left-color: #c0392b;
+  background: rgba(192, 57, 43, 0.08);
+  opacity: 0.85;
+}
+.rp-bet.rp-pending {
+  border-left-color: #ffd700;
+  animation: rp-pending-pulse 1.4s ease-in-out infinite;
+}
+@keyframes rp-pending-pulse {
+  0%, 100% { background: rgba(255, 255, 255, 0.04); }
+  50%      { background: rgba(255, 215, 0, 0.1); }
+}
+.rp-bet-label {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #f4e4b6;
+}
+.rp-bet-stake {
+  font-family: 'Courier New', monospace;
+  font-weight: 800;
+  color: #ffd700;
+  font-size: 0.85rem;
+}
+.rp-bet-stake::before { content: '💰'; margin-right: 4px; opacity: 0.7; }
+.rp-bet-outcome {
+  font-family: 'Courier New', monospace;
+  font-weight: 900;
+  font-size: 1rem;
+  min-width: 50px;
+  text-align: right;
+}
+.rp-bet.won .rp-bet-outcome  { color: #2bc16f; }
+.rp-bet.lost .rp-bet-outcome { color: #ff7a6b; }
+
+.rp-footer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  font-family: 'Cinzel', serif;
+}
+.rp-footer.won  { border-color: #2bc16f; box-shadow: 0 0 14px rgba(43, 193, 111, 0.25); }
+.rp-footer.lost { border-color: #c0392b; }
+.rp-net-label {
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.rp-net-value {
+  font-family: 'Courier New', monospace;
+  font-weight: 900;
+  font-size: 1.6rem;
+  text-align: right;
+}
+.rp-footer.won  .rp-net-value { color: #2bc16f; text-shadow: 0 0 12px rgba(43, 193, 111, 0.5); }
+.rp-footer.lost .rp-net-value { color: #ff7a6b; }
+.rp-footer.flat .rp-net-value { color: #ffd700; }
+.rp-balance {
+  grid-column: 1 / -1;
+  text-align: right;
+  font-size: 0.8rem;
+  font-family: 'Courier New', monospace;
+  opacity: 0.7;
+  border-top: 1px dashed rgba(255, 215, 0, 0.2);
+  padding-top: 6px;
+}
+.rp-next {
+  text-align: center;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+  font-style: italic;
 }
 
 /* ======= SMALL SCREENS — phone-as-host fallback ======= */

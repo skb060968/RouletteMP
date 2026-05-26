@@ -120,7 +120,6 @@ function attachRoomListener() {
     },
     onGameChange: (game) => {
       firebaseSnapshot.game = game;
-      renderRecentResults();
     },
     onWheelChange: (wheel) => {
       firebaseSnapshot.wheel = wheel;
@@ -215,7 +214,6 @@ async function startRound() {
 }
 
 function setupGameUi() {
-  renderRecentResults();
   renderPlayerStrip();
   renderTotalBets();
   // Reset wheel rotation (preserving the perspective tilt)
@@ -486,41 +484,105 @@ function buildWheel() {
       <stop offset="35%" stop-color="#ffd700"/>
       <stop offset="80%" stop-color="#a07700"/>
       <stop offset="100%" stop-color="#4a3500"/>
-    </radialGradient>`;
+    </radialGradient>
+    <linearGradient id="arm-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff5c4"/>
+      <stop offset="50%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#a07700"/>
+    </linearGradient>`;
   svg.insertBefore(defs, svg.firstChild);
-  const hub = document.createElementNS(svgNS, 'circle');
-  hub.setAttribute('cx', cx);
-  hub.setAttribute('cy', cy);
-  hub.setAttribute('r', '14');
-  hub.setAttribute('fill', 'url(#hub-grad)');
-  hub.setAttribute('stroke', '#3a2800');
-  hub.setAttribute('stroke-width', '0.6');
-  svg.appendChild(hub);
-  // Inner highlight on hub for extra polish
-  const hubShine = document.createElementNS(svgNS, 'ellipse');
-  hubShine.setAttribute('cx', cx - 3);
-  hubShine.setAttribute('cy', cy - 4);
-  hubShine.setAttribute('rx', '5');
-  hubShine.setAttribute('ry', '2.5');
-  hubShine.setAttribute('fill', 'rgba(255,255,255,0.6)');
-  svg.appendChild(hubShine);
+
+  // Turret — the brass cross-and-spindle every real roulette wheel has at
+  // center. Replaces the old flat sphere/hub. Built as: small dark base disc
+  // → four tapered arms with decorative bulbs at the tips → a polished
+  // spindle/cap finial sitting on top. Drawn in this layered order so the
+  // cap reads as the highest point of a 3D turret.
+  const turret = document.createElementNS(svgNS, 'g');
+  turret.setAttribute('class', 'turret');
+  const armLength = 38;
+  const armWidth = 5;
+
+  // Dark base disc — anchors the arms and gives the turret something to
+  // sit on without competing with it visually.
+  const base = document.createElementNS(svgNS, 'circle');
+  base.setAttribute('cx', cx);
+  base.setAttribute('cy', cy);
+  base.setAttribute('r', '9');
+  base.setAttribute('fill', '#1f1500');
+  base.setAttribute('stroke', '#ffd700');
+  base.setAttribute('stroke-width', '0.6');
+  turret.appendChild(base);
+
+  // Four arms radiating from the center with bulbs and bulb highlights.
+  for (let a = 0; a < 4; a++) {
+    const angle = a * 90;
+    const arm = document.createElementNS(svgNS, 'rect');
+    arm.setAttribute('x', -armWidth / 2);
+    arm.setAttribute('y', -armLength);
+    arm.setAttribute('width', armWidth);
+    arm.setAttribute('height', armLength);
+    arm.setAttribute('fill', 'url(#arm-grad)');
+    arm.setAttribute('stroke', '#3a2800');
+    arm.setAttribute('stroke-width', '0.3');
+    arm.setAttribute('rx', '1.5');
+    arm.setAttribute('transform', `rotate(${angle})`);
+    turret.appendChild(arm);
+
+    const rad = (angle - 90) * Math.PI / 180;
+    const tipX = Math.cos(rad) * armLength;
+    const tipY = Math.sin(rad) * armLength;
+
+    const bulb = document.createElementNS(svgNS, 'circle');
+    bulb.setAttribute('cx', tipX);
+    bulb.setAttribute('cy', tipY);
+    bulb.setAttribute('r', '4');
+    bulb.setAttribute('fill', 'url(#hub-grad)');
+    bulb.setAttribute('stroke', '#3a2800');
+    bulb.setAttribute('stroke-width', '0.4');
+    turret.appendChild(bulb);
+
+    const bulbShine = document.createElementNS(svgNS, 'circle');
+    bulbShine.setAttribute('cx', tipX - 1);
+    bulbShine.setAttribute('cy', tipY - 1.2);
+    bulbShine.setAttribute('r', '1.2');
+    bulbShine.setAttribute('fill', 'rgba(255,255,255,0.75)');
+    turret.appendChild(bulbShine);
+  }
+
+  // Central spindle — small polished pillar where the four arms meet.
+  const spindle = document.createElementNS(svgNS, 'circle');
+  spindle.setAttribute('cx', cx);
+  spindle.setAttribute('cy', cy);
+  spindle.setAttribute('r', '6');
+  spindle.setAttribute('fill', 'url(#hub-grad)');
+  spindle.setAttribute('stroke', '#3a2800');
+  spindle.setAttribute('stroke-width', '0.5');
+  turret.appendChild(spindle);
+
+  // Finial cap — bright knob at the very top of the turret.
+  const cap = document.createElementNS(svgNS, 'circle');
+  cap.setAttribute('cx', cx);
+  cap.setAttribute('cy', cy);
+  cap.setAttribute('r', '2.6');
+  cap.setAttribute('fill', '#fff5c4');
+  cap.setAttribute('opacity', '0.95');
+  turret.appendChild(cap);
+
+  // Tiny specular highlight on the cap for polish.
+  const capShine = document.createElementNS(svgNS, 'ellipse');
+  capShine.setAttribute('cx', cx - 0.7);
+  capShine.setAttribute('cy', cy - 0.9);
+  capShine.setAttribute('rx', '1');
+  capShine.setAttribute('ry', '0.5');
+  capShine.setAttribute('fill', 'rgba(255,255,255,0.95)');
+  turret.appendChild(capShine);
+
+  svg.appendChild(turret);
 
   wheel.appendChild(svg);
 }
 
 /* ======= RENDER HELPERS ======= */
-function renderRecentResults() {
-  const strip = document.getElementById('tv-recent');
-  if (!strip) return;
-  const last = (firebaseSnapshot.game?.lastResults || []).slice(-10);
-  strip.innerHTML = last.length
-    ? last.map((n) => {
-        const c = colorOf(n);
-        return `<span class="recent-chip ${c}">${n}</span>`;
-      }).join('')
-    : '<span class="recent-empty">No spins yet</span>';
-}
-
 function renderPlayerStrip() {
   const strip = document.getElementById('tv-player-strip');
   if (!strip) return;
