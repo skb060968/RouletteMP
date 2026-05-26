@@ -193,7 +193,9 @@ function attachRoomListener() {
     },
     onPayoutsChange: (payouts) => {
       firebaseSnapshot.payouts = payouts;
-      // Show "you won X" toast on payout
+      // Show "you won X" toast on payout — winner only celebrates with
+      // confetti + win sound; loser hears a soft error chime; player
+      // who just went broke gets a louder error to mark the moment.
       const status = firebaseSnapshot.meta?.status;
       if (status === 'payout' && payouts && playerIndex != null) {
         const my = payouts[`player_${playerIndex}`];
@@ -202,8 +204,15 @@ function attachRoomListener() {
           if (my.netDelta > 0) {
             showToast(`🏆 You won ${my.netDelta} chips!`, 2400);
             playSound('win');
+            burstPhoneConfetti();
           } else if (my.netDelta < 0) {
             showToast(`Lost ${-my.netDelta} chips`, 1600);
+            // If this loss took them to broke, mark it with the error
+            // chime — softer if just a regular loss with no error.
+            const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
+            if (me && (me.broke || (me.chips ?? 0) <= 0)) {
+              playSound('error', 0.7);
+            }
           }
         }
       }
@@ -386,6 +395,25 @@ function onBetCellTap(cell) {
 
 function totalLocal() {
   return Object.values(localBets).reduce((s, n) => s + n, 0);
+}
+
+/** Phone-side confetti for the winner. Bursts colors matching the winning
+ *  number's color (red/black/green) so it feels themed. */
+function burstPhoneConfetti() {
+  if (typeof window.confetti !== 'function') return;
+  const win = firebaseSnapshot.wheel?.winningNumber;
+  const c = win == null ? 'green' : colorOf(win);
+  const palette = c === 'red'   ? ['#ff6b6b', '#c0392b', '#fff', '#ffd700'] :
+                  c === 'black' ? ['#34495e', '#2c3e50', '#fff', '#ffd700'] :
+                                  ['#2ecc71', '#27ae60', '#fff', '#ffd700'];
+  try {
+    window.confetti({
+      particleCount: 140,
+      spread: 80,
+      origin: { y: 0.4 },
+      colors: palette,
+    });
+  } catch (_) {}
 }
 
 function scheduleBetWrite(key, type, target) {

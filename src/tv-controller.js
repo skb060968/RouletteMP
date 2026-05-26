@@ -333,7 +333,7 @@ async function triggerSpin() {
     void rien.offsetWidth;
     rien.classList.add('show');
   }
-  playSound('betClose', 0.6);
+  playSound('betClose', 1.0);
 
   // After the flash (1s), start the wheel spin
   setTimeout(() => {
@@ -363,12 +363,7 @@ async function triggerSpin() {
       ballOrbit.style.transition = 'transform 5s cubic-bezier(0.15, 0.7, 0.3, 1)';
       ballOrbit.style.transform = `rotateX(14deg) rotate(-2520deg)`;  // 7 full opposite turns
     }
-    playSound('spin', 0.5);
-
-    // Ball-drop "tink" right at the moment the wheel settles. ~4.7s into
-    // the 5s easing, the rotation is essentially done. Using error.mp3 as
-    // a stand-in until a proper SFX is sourced.
-    setTimeout(() => playSound('error', 0.6), 4700);
+    playSound('spin', 1.0);
 
     if (_spinAnimationTimer) clearTimeout(_spinAnimationTimer);
     _spinAnimationTimer = setTimeout(async () => {
@@ -394,11 +389,8 @@ async function onSpinSettled(winningNumber) {
   const bets = firebaseSnapshot.bets || {};
   const { newBalances, newBroke, payouts } = resolveRound(bets, players, winningNumber);
 
-  // Only celebrate with a win chime if at least one player actually won.
-  // Otherwise the round end is silent on TV — players' phones will
-  // celebrate themselves via their own win toast + sound.
-  const anyoneWon = Object.values(payouts).some((p) => (p?.netDelta || 0) > 0);
-  if (anyoneWon) playSound('win');
+  // TV is silent at round end — only the wheel-spin and "no more bets"
+  // sounds play on TV. Player phones celebrate their own wins individually.
 
   // Build a single update bundle
   const updates = {};
@@ -421,7 +413,6 @@ async function onSpinSettled(winningNumber) {
       </span>`;
     tag.classList.add('show', 'reveal');
   }
-  burstConfetti(color);
 
   // Highlight top winner
   const sorted = Object.entries(payouts).sort((a, b) => (b[1].netDelta || 0) - (a[1].netDelta || 0));
@@ -441,17 +432,6 @@ async function onSpinSettled(winningNumber) {
   }, 3500);
 }
 
-function burstConfetti(color) {
-  if (typeof window.confetti !== 'function') return;
-  const palette = color === 'red'   ? ['#ff6b6b', '#c0392b', '#fff'] :
-                  color === 'black' ? ['#34495e', '#2c3e50', '#fff'] :
-                                      ['#2ecc71', '#27ae60', '#fff'];
-  try {
-    window.confetti({ particleCount: 200, spread: 100, origin: { y: 0.5 }, colors: palette });
-  } catch (_) {}
-}
-
-/* ======= WHEEL CONSTRUCTION ======= */
 function buildWheel() {
   // Rendered once with inline SVG so we don't need a wheel.png asset.
   const wheel = document.getElementById('tv-wheel');
