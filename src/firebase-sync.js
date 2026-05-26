@@ -16,6 +16,33 @@ const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const MAX_PLAYERS = 12;
 export const STARTING_CHIPS = 1000;
 
+/* ======= SERVER TIME =======
+ * Both TV and phones must agree on "now" so the bet timer countdown matches.
+ * Local Date.now() can drift between devices by several seconds — using
+ * Firebase's .info/serverTimeOffset lets every device compute the same
+ * server-time when scheduling/reading betsCloseAt. */
+let _serverTimeOffset = 0;
+let _offsetSubscribed = false;
+function subscribeServerTimeOffset() {
+  if (_offsetSubscribed) return;
+  _offsetSubscribed = true;
+  try {
+    onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
+      const v = snap.val();
+      if (typeof v === 'number') _serverTimeOffset = v;
+    });
+  } catch (err) {
+    console.warn('serverTimeOffset listener failed:', err.message);
+  }
+}
+subscribeServerTimeOffset();
+
+/** Returns the current server time in ms (Date.now() + serverTimeOffset).
+ *  Use this everywhere the TV and phones must agree on "now". */
+export function serverNow() {
+  return Date.now() + _serverTimeOffset;
+}
+
 export async function firebaseRetry(fn, maxRetries = 2, delayMs = 500) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try { return await fn(); }
@@ -132,7 +159,9 @@ export function listenRoom(roomCode, callbacks) {
 
 /** Open the betting phase. Phones unlock the felt. */
 export async function openBets(roomCode, autoCloseSeconds = 30) {
-  const closesAt = autoCloseSeconds ? Date.now() + autoCloseSeconds * 1000 : null;
+  // Use server-aligned time so phones' countdowns match the TV's regardless
+  // of device clock drift between them.
+  const closesAt = autoCloseSeconds ? serverNow() + autoCloseSeconds * 1000 : null;
   await firebaseRetry(() =>
     update(ref(db, `${ROOM_PATH}/${roomCode}`), {
       'meta/status': 'betting',

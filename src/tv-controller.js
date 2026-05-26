@@ -584,23 +584,31 @@ function buildWheel() {
 
 /* ======= RENDER HELPERS ======= */
 function renderPlayerStrip() {
-  const strip = document.getElementById('tv-player-strip');
-  if (!strip) return;
+  const left = document.getElementById('tv-players-left');
+  const right = document.getElementById('tv-players-right');
+  if (!left || !right) return;
   const players = firebaseSnapshot.players || {};
   const keys = Object.keys(players).sort();
-  strip.innerHTML = '';
-  keys.forEach((k) => {
-    const p = players[k] || {};
-    const card = document.createElement('div');
-    card.className = 'tv-player-card';
-    if (p.broke || (p.chips ?? 0) <= 0) card.classList.add('broke');
-    if (!p.connected) card.classList.add('disconnected');
-    card.innerHTML = `
-      <span class="pc-emoji">${escapeHtml(p.emoji || '😀')}</span>
-      <span class="pc-name">${escapeHtml(p.name || 'Player')}</span>
-      <span class="pc-chips">💰 ${p.chips ?? 0}</span>`;
-    strip.appendChild(card);
-  });
+  const half = Math.ceil(keys.length / 2);
+
+  const renderInto = (el, slice) => {
+    el.innerHTML = '';
+    el.classList.toggle('cols-2', slice.length > 6);
+    slice.forEach((k) => {
+      const p = players[k] || {};
+      const card = document.createElement('div');
+      card.className = 'tv-player-card';
+      if (p.broke || (p.chips ?? 0) <= 0) card.classList.add('broke');
+      if (!p.connected) card.classList.add('disconnected');
+      card.innerHTML = `
+        <span class="pc-emoji">${escapeHtml(p.emoji || '😀')}</span>
+        <span class="pc-name">${escapeHtml(p.name || 'Player')}</span>
+        <span class="pc-chips">💰 ${p.chips ?? 0}</span>`;
+      el.appendChild(card);
+    });
+  };
+  renderInto(left,  keys.slice(0, half));
+  renderInto(right, keys.slice(half));
 }
 
 function renderTotalBets() {

@@ -10,7 +10,7 @@
 import {
   joinRoomAsPlayer, listenRoom, setupPlayerDisconnectHandler,
   writeBet, clearPlayerBets, leaveRoom, rejoinRoom,
-  MAX_PLAYERS,
+  serverNow, MAX_PLAYERS,
 } from './firebase-sync.js';
 import { BET_TYPES, betKey, payoutMultiplier, resolveBets } from './bet-validator.js';
 import { colorOf } from './wheel.js';
@@ -713,7 +713,9 @@ function renderHeader() {
   if (status === 'betting') {
     const closeAt = firebaseSnapshot.game?.betsCloseAt;
     if (closeAt) {
-      const sec = Math.max(0, Math.ceil((closeAt - Date.now()) / 1000));
+      // Use server-aligned time so the phone's countdown matches the TV's
+      // regardless of device clock drift.
+      const sec = Math.max(0, Math.ceil((closeAt - serverNow()) / 1000));
       headerEl.innerHTML = `<span class="status-betting">BETS OPEN · ${sec}s</span>`;
     } else {
       headerEl.innerHTML = `<span class="status-betting">BETS OPEN</span>`;
