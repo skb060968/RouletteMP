@@ -141,8 +141,8 @@ function attachRoomListener() {
         showScreen('phone-lobby');
         renderPhoneLobby();
       } else if (status === 'betting') {
-        // New round opened — clear last round's snapshot so the result panel
-        // hides and the bet board takes over again.
+        // New round opened — clear all bet state so players start fresh
+        localBets = {};
         lastRoundBets = {};
         lastRoundBetObjects = [];
         showScreen('phone-game');
@@ -167,6 +167,7 @@ function attachRoomListener() {
       }
     },
     onPlayersChange: (players) => {
+      const oldPlayers = firebaseSnapshot.players;
       firebaseSnapshot.players = players;
       const myKey = `player_${playerIndex}`;
       if (players && Object.keys(players).length > 0 && !players[myKey]) {
@@ -174,6 +175,24 @@ function attachRoomListener() {
         cleanupAndGoHome();
         return;
       }
+      
+      // Fix: If player was broke and now has chips during payout phase,
+      // clear result screen so they can see the bet board (disabled until betting opens)
+      const status = firebaseSnapshot.meta?.status;
+      const me = players?.[myKey];
+      const oldMe = oldPlayers?.[myKey];
+      if (status === 'payout' && me && oldMe) {
+        const wasBroke = oldMe.broke || (oldMe.chips ?? 0) <= 0;
+        const nowHasChips = !me.broke && (me.chips ?? 0) > 0;
+        if (wasBroke && nowHasChips) {
+          // Player received bonus/reset — clear result screen state
+          lastRoundBets = {};
+          lastRoundBetObjects = [];
+          showToast(`💰 Received ${me.chips} chips!`, 2000);
+          renderResultPanel(); // Will hide result panel and show bet board
+        }
+      }
+      
       renderPhoneLobby();
       renderHeader();
       renderBetBoard();
