@@ -66,13 +66,8 @@
       <div class="tv-game-body">
         <div class="tv-players-side tv-players-left" id="tv-players-left" aria-label="Players left"></div>
         <div class="tv-wheel-wrap">
-          <div class="tv-wheel-pointer" aria-hidden="true"></div>
-          <div id="tv-wheel" class="tv-wheel" role="img" aria-label="Roulette wheel"></div>
-          <!-- Orbiting ivory ball — animated separately from wheel rotation
-               so it can spin opposite direction and decelerate independently. -->
-          <div id="tv-ball-orbit" class="tv-ball-orbit" aria-hidden="true">
-            <div class="tv-ball"></div>
-          </div>
+        <div class="tv-wheel-pointer" aria-hidden="true"></div>
+          <canvas id="tv-wheel-canvas" class="tv-wheel-canvas" role="img" aria-label="Roulette wheel"></canvas>
           <div id="tv-rien" class="tv-rien">NO MORE BETS</div>
           <div id="tv-winning-tag" class="tv-winning-tag"></div>
         </div>

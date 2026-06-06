@@ -15,8 +15,8 @@ import {
   firebaseRetry, MAX_PLAYERS,
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
-import { WHEEL_SEQUENCE, colorOf, rotationForWinning } from './wheel.js';
-import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
+import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
+import { initAudio, playSound, stopSpinSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
 import { db } from './firebase-config.js';
 import { ref, get } from 'firebase/database';
@@ -30,6 +30,29 @@ let _autoCloseTimer = null;
 let _countdownTimer = null;
 let _spinAnimationTimer = null;
 let _resultsShown = false;
+
+/* ======= CANVAS WHEEL STATE ======= */
+// Physics state for the canvas-based wheel + ball renderer
+const _wheel = {
+  angle: 0,        // current wheel rotation in radians (clockwise)
+  angVel: 0,       // current angular velocity rad/s
+  targetAngle: 0,  // final resting angle
+  spinning: false,
+};
+const _ball = {
+  angle: 0,        // current ball position in radians (counter-clockwise from top)
+  angVel: 0,       // angular velocity (positive = counter-clockwise)
+  radius: 0,       // current orbit radius as fraction of wheel radius (0..1)
+  outerR: 0.88,    // outer track radius fraction
+  pocketR: 0.76,   // pocket (settled) radius fraction
+  dropped: false,  // has ball dropped into pocket yet
+  settling: false, // bounce animation in progress
+  settleT: 0,      // settle animation time
+  visible: false,
+};
+let _rafId = null;           // requestAnimationFrame handle for wheel loop
+let _offscreenCanvas = null; // pre-rendered static wheel face
+let _canvasSize = 0;         // last rendered canvas size
 
 /* ======= SESSION ======= */
 function saveSession() {
@@ -219,21 +242,23 @@ async function startRound() {
 function setupGameUi() {
   renderPlayerStrip();
   renderTotalBets();
-  // Reset wheel rotation (preserving the perspective tilt)
-  const wheel = document.getElementById('tv-wheel');
-  if (wheel) wheel.style.transform = 'rotateX(14deg) rotate(0deg)';
-  // Reset ball orbit
-  const ballOrbit = document.getElementById('tv-ball-orbit');
-  if (ballOrbit) {
-    ballOrbit.classList.remove('spinning', 'settled');
-    ballOrbit.style.transition = 'none';
-    ballOrbit.style.transform = `rotateX(14deg) rotate(0deg)`;
-  }
+  // Reset wheel + ball to idle state
+  _wheel.angle   = 0;
+  _wheel.angVel  = 0;
+  _wheel.spinning = false;
+  _ball.visible   = false;
+  _ball.dropped   = false;
+  _ball.settling  = false;
+  _ball.angle     = 0;
+  _ball.angVel    = 0;
+  _ball.radius    = _ball.outerR;
   // Hide winning-number tag and rien flash
   const tag = document.getElementById('tv-winning-tag');
   if (tag) { tag.classList.remove('show'); tag.innerHTML = ''; }
   const rien = document.getElementById('tv-rien');
   if (rien) rien.classList.remove('show');
+  // Ensure render loop is running so the idle wheel is visible
+  startWheelRenderLoop();
 }
 
 function wireTvGame() {
@@ -318,16 +343,14 @@ function stopCountdown() {
 /* ======= SPIN ======= */
 async function triggerSpin() {
   if (!roomCode) return;
-  if (firebaseSnapshot.meta?.status !== 'betting') return; // already spinning
+  if (firebaseSnapshot.meta?.status !== 'betting') return;
 
   stopCountdown();
   await fbCloseBets(roomCode);
 
-  // Pick the winning number locally
   const winningNumber = Math.floor(Math.random() * 37);
 
-  // "Rien ne va plus" flash — adds the casino-call moment between bets
-  // closing and the wheel spinning.
+  // "Rien ne va plus" flash
   const rien = document.getElementById('tv-rien');
   if (rien) {
     rien.classList.remove('show');
@@ -336,46 +359,131 @@ async function triggerSpin() {
   }
   playSound('betClose', 1.0);
 
-  // After the flash (1s), start the wheel spin
+  // 1s flash delay, then start physics spin
   setTimeout(() => {
-    const wheel = document.getElementById('tv-wheel');
     const tag = document.getElementById('tv-winning-tag');
     if (tag) {
       tag.innerHTML = `<span class="spinning">SPINNING…</span>`;
       tag.classList.add('show');
     }
-    if (wheel) {
-      const deg = rotationForWinning(winningNumber, 5);
-      wheel.style.transition = 'transform 5s cubic-bezier(0.2, 0.85, 0.3, 1)';
-      // Preserve the perspective tilt during the rotation.
-      wheel.style.transform = `rotateX(14deg) rotate(${deg}deg)`;
-    }
-    // Ball orbits opposite direction at decreasing speed. We rotate the
-    // ball-orbit wrapper from 0 to -7 full turns over 5s. End position is
-    // 0deg (i.e. ball lands at the 12 o'clock pointer, which by then has
-    // the winning segment under it after the wheel has turned).
-    const ballOrbit = document.getElementById('tv-ball-orbit');
-    if (ballOrbit) {
-      ballOrbit.classList.remove('settled');
-      ballOrbit.classList.add('spinning');
-      ballOrbit.style.transition = 'none';
-      ballOrbit.style.transform = `rotateX(14deg) rotate(0deg)`;
-      void ballOrbit.offsetWidth;
-      ballOrbit.style.transition = 'transform 5s cubic-bezier(0.15, 0.7, 0.3, 1)';
-      ballOrbit.style.transform = `rotateX(14deg) rotate(-2520deg)`;  // 7 full opposite turns
-    }
     playSound('spin', 1.0);
-
-    if (_spinAnimationTimer) clearTimeout(_spinAnimationTimer);
-    _spinAnimationTimer = setTimeout(async () => {
-      // Trigger the settle bounce on the ball
-      if (ballOrbit) {
-        ballOrbit.classList.remove('spinning');
-        ballOrbit.classList.add('settled');
-      }
-      await onSpinSettled(winningNumber);
-    }, 5000);
+    startPhysicsSpin(winningNumber);
   }, 1000);
+}
+
+/**
+ * Compute the target wheel angle (radians, clockwise) so that the
+ * winning segment's centre sits exactly at the top (12 o'clock = pointer).
+ * Add extra full spins for theatrics.
+ */
+function targetAngleForWinning(winningNumber, extraSpins = 5) {
+  const idx = WHEEL_SEQUENCE.indexOf(winningNumber);
+  if (idx < 0) return extraSpins * Math.PI * 2;
+  const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
+  // Segment idx centre is at (idx + 0.5)*segRad clockwise from top.
+  // We need to rotate CW so that centre lands at 0 (top).
+  const target = ((Math.PI * 2) - (idx + 0.5) * segRad + Math.PI * 2) % (Math.PI * 2);
+  return extraSpins * Math.PI * 2 + target;
+}
+
+/**
+ * Launch a physics-based spin.
+ * Wheel: clockwise, decelerates with exponential friction to land winning number at top.
+ * Ball: counter-clockwise, faster start, decelerates independently, drops inward near stop.
+ * Total duration matches the 5s sound file.
+ */
+function startPhysicsSpin(winningNumber) {
+  const SPIN_DURATION = 5.0; // seconds — matches spin-loop.mp3
+
+  // Work out final wheel angle
+  const finalWheelAngle = targetAngleForWinning(winningNumber, 5);
+
+  // Physics approach: use exponential deceleration.
+  // angle(t) = v0/k * (1 - e^(-kt)) where k = friction coefficient.
+  // We want angle(T) = finalWheelAngle.  Pick k then solve for v0.
+  const k = 1.1; // friction — higher = faster deceleration
+  const T = SPIN_DURATION;
+  const v0_wheel = finalWheelAngle * k / (1 - Math.exp(-k * T));
+
+  // Ball starts at 0 (top), spins CCW faster, decelerates to also stop at top
+  // (7 full CCW turns + back to top = 7 * 2π for CCW motion)
+  const ballTotalAngle = 7 * Math.PI * 2; // 7 counter-clockwise full turns
+  const k_ball = 0.85; // ball decelerates slightly slower → drops late
+  const v0_ball = ballTotalAngle * k_ball / (1 - Math.exp(-k_ball * T));
+
+  // Reset state
+  _wheel.angle   = 0;
+  _wheel.angVel  = v0_wheel;
+  _wheel.spinning = true;
+  _ball.angle    = 0;
+  _ball.angVel   = v0_ball;
+  _ball.radius   = _ball.outerR;
+  _ball.dropped  = false;
+  _ball.settling = false;
+  _ball.settleT  = 0;
+  _ball.visible  = true;
+
+  let elapsed = 0;
+  let lastTime = performance.now();
+  let settled = false;
+
+  // Drop threshold: ball drops when angVel falls to this fraction of v0
+  const DROP_VEL = v0_ball * 0.07;
+
+  function frame(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    elapsed += dt;
+
+    if (!settled) {
+      // Exponential deceleration: vel *= e^(-k*dt)
+      _wheel.angVel = v0_wheel * Math.exp(-k * elapsed);
+      _ball.angVel  = v0_ball  * Math.exp(-k_ball * elapsed);
+
+      // Integrate angles
+      _wheel.angle += _wheel.angVel * dt;
+      _ball.angle  += _ball.angVel  * dt;
+
+      // Drop ball inward when it slows enough
+      if (!_ball.dropped && _ball.angVel < DROP_VEL) {
+        _ball.dropped = true;
+      }
+
+      // Smoothly move ball radius inward once dropped
+      if (_ball.dropped) {
+        _ball.radius += (_ball.pocketR - _ball.radius) * Math.min(1, dt * 8);
+      }
+
+      // After SPIN_DURATION snap to exact final positions and trigger settle
+      if (elapsed >= T) {
+        settled = true;
+        _wheel.angle   = finalWheelAngle % (Math.PI * 2);
+        _wheel.angVel  = 0;
+        _wheel.spinning = false;
+        _ball.angle    = 0; // ball ends at top = 12 o'clock = pointer
+        _ball.angVel   = 0;
+        _ball.radius   = _ball.pocketR;
+        _ball.dropped  = true;
+        _ball.settling = true;
+        _ball.settleT  = 0;
+        drawWheelFrame();
+        onSpinSettled(winningNumber);
+        return;
+      }
+    }
+
+    // Settle bounce animation
+    if (_ball.settling) {
+      _ball.settleT += dt;
+      if (_ball.settleT > 0.6) _ball.settling = false;
+    }
+
+    drawWheelFrame();
+    _rafId = requestAnimationFrame(frame);
+  }
+
+  if (_rafId) cancelAnimationFrame(_rafId);
+  _rafId = requestAnimationFrame(frame);
 }
 
 async function onSpinSettled(winningNumber) {
@@ -433,156 +541,262 @@ async function onSpinSettled(winningNumber) {
   }, 3500);
 }
 
-function buildWheel() {
-  // Rendered once with inline SVG so we don't need a wheel.png asset.
-  const wheel = document.getElementById('tv-wheel');
-  if (!wheel || wheel.dataset._built) return;
-  wheel.dataset._built = '1';
+/* ======= CANVAS WHEEL RENDERER ======= */
 
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('viewBox', '-100 -100 200 200');
-  svg.setAttribute('class', 'wheel-svg');
+/**
+ * Pre-render the static wheel face (segments + numbers + rim + turret)
+ * onto an offscreen canvas at the given pixel size. Re-built only when
+ * the canvas size changes.
+ */
+function buildOffscreenWheel(size) {
+  if (_offscreenCanvas && _canvasSize === size) return _offscreenCanvas;
+  _canvasSize = size;
 
-  const cx = 0, cy = 0, r = 90;
-  const segDeg = 360 / WHEEL_SEQUENCE.length;
-  WHEEL_SEQUENCE.forEach((n, i) => {
-    const startA = (i * segDeg - 90) * Math.PI / 180;
-    const endA = ((i + 1) * segDeg - 90) * Math.PI / 180;
-    const x1 = cx + r * Math.cos(startA);
-    const y1 = cy + r * Math.sin(startA);
-    const x2 = cx + r * Math.cos(endA);
-    const y2 = cy + r * Math.sin(endA);
-    const path = document.createElementNS(svgNS, 'path');
-    path.setAttribute('d', `M${cx},${cy} L${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2} Z`);
-    const c = colorOf(n);
-    path.setAttribute('fill', c === 'red' ? '#c0392b' : c === 'black' ? '#1a1a1a' : '#27ae60');
-    path.setAttribute('stroke', '#ffd700');
-    path.setAttribute('stroke-width', '0.4');
-    svg.appendChild(path);
+  const oc = document.createElement('canvas');
+  oc.width = oc.height = size;
+  const g = oc.getContext('2d');
+  const cx = size / 2, cy = size / 2;
+  const R = size / 2;
 
-    // Number label
-    const labelA = ((i + 0.5) * segDeg - 90) * Math.PI / 180;
-    const lr = r * 0.78;
-    const lx = cx + lr * Math.cos(labelA);
-    const ly = cy + lr * Math.sin(labelA);
-    const text = document.createElementNS(svgNS, 'text');
-    text.setAttribute('x', lx);
-    text.setAttribute('y', ly);
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('dominant-baseline', 'middle');
-    text.setAttribute('fill', '#fff');
-    text.setAttribute('font-size', '7');
-    text.setAttribute('font-weight', '800');
-    text.setAttribute('transform', `rotate(${i * segDeg + segDeg / 2}, ${lx}, ${ly})`);
-    text.textContent = String(n);
-    svg.appendChild(text);
-  });
-  // Center hub — layered gradient for chrome/gold metallic depth
-  const svgNS_def = 'http://www.w3.org/2000/svg';
-  const defs = document.createElementNS(svgNS_def, 'defs');
-  defs.innerHTML = `
-    <radialGradient id="hub-grad" cx="35%" cy="30%" r="65%">
-      <stop offset="0%" stop-color="#fff5c4"/>
-      <stop offset="35%" stop-color="#ffd700"/>
-      <stop offset="80%" stop-color="#a07700"/>
-      <stop offset="100%" stop-color="#4a3500"/>
-    </radialGradient>
-    <linearGradient id="arm-grad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#fff5c4"/>
-      <stop offset="50%" stop-color="#ffd700"/>
-      <stop offset="100%" stop-color="#a07700"/>
-    </linearGradient>`;
-  svg.insertBefore(defs, svg.firstChild);
-
-  // Turret — the brass cross-and-spindle every real roulette wheel has at
-  // center. Replaces the old flat sphere/hub. Built as: small dark base disc
-  // → four tapered arms with decorative bulbs at the tips → a polished
-  // spindle/cap finial sitting on top. Drawn in this layered order so the
-  // cap reads as the highest point of a 3D turret.
-  const turret = document.createElementNS(svgNS, 'g');
-  turret.setAttribute('class', 'turret');
-  const armLength = 38;
-  const armWidth = 5;
-
-  // Dark base disc — anchors the arms and gives the turret something to
-  // sit on without competing with it visually.
-  const base = document.createElementNS(svgNS, 'circle');
-  base.setAttribute('cx', cx);
-  base.setAttribute('cy', cy);
-  base.setAttribute('r', '9');
-  base.setAttribute('fill', '#1f1500');
-  base.setAttribute('stroke', '#ffd700');
-  base.setAttribute('stroke-width', '0.6');
-  turret.appendChild(base);
-
-  // Four arms radiating from the center with bulbs and bulb highlights.
-  for (let a = 0; a < 4; a++) {
-    const angle = a * 90;
-    const arm = document.createElementNS(svgNS, 'rect');
-    arm.setAttribute('x', -armWidth / 2);
-    arm.setAttribute('y', -armLength);
-    arm.setAttribute('width', armWidth);
-    arm.setAttribute('height', armLength);
-    arm.setAttribute('fill', 'url(#arm-grad)');
-    arm.setAttribute('stroke', '#3a2800');
-    arm.setAttribute('stroke-width', '0.3');
-    arm.setAttribute('rx', '1.5');
-    arm.setAttribute('transform', `rotate(${angle})`);
-    turret.appendChild(arm);
-
-    const rad = (angle - 90) * Math.PI / 180;
-    const tipX = Math.cos(rad) * armLength;
-    const tipY = Math.sin(rad) * armLength;
-
-    const bulb = document.createElementNS(svgNS, 'circle');
-    bulb.setAttribute('cx', tipX);
-    bulb.setAttribute('cy', tipY);
-    bulb.setAttribute('r', '4');
-    bulb.setAttribute('fill', 'url(#hub-grad)');
-    bulb.setAttribute('stroke', '#3a2800');
-    bulb.setAttribute('stroke-width', '0.4');
-    turret.appendChild(bulb);
-
-    const bulbShine = document.createElementNS(svgNS, 'circle');
-    bulbShine.setAttribute('cx', tipX - 1);
-    bulbShine.setAttribute('cy', tipY - 1.2);
-    bulbShine.setAttribute('r', '1.2');
-    bulbShine.setAttribute('fill', 'rgba(255,255,255,0.75)');
-    turret.appendChild(bulbShine);
+  // ── Outer rim rings ──────────────────────────────────────────────────
+  const rimColors = ['#2a1f08','#ffe27a','#c69511','#6a4d04','#ffd966','#8a6a13','#c69511','#3a2800'];
+  const rimWidths = [2, 2, 2, 1.5, 1.5, 1.5, 1.5, 1.5];
+  let rimR = R;
+  for (let i = 0; i < rimColors.length; i++) {
+    g.beginPath();
+    g.arc(cx, cy, rimR, 0, Math.PI * 2);
+    g.fillStyle = rimColors[i];
+    g.fill();
+    rimR -= rimWidths[i] * (R / 200);
   }
 
-  // Central spindle — small polished pillar where the four arms meet.
-  const spindle = document.createElementNS(svgNS, 'circle');
-  spindle.setAttribute('cx', cx);
-  spindle.setAttribute('cy', cy);
-  spindle.setAttribute('r', '6');
-  spindle.setAttribute('fill', 'url(#hub-grad)');
-  spindle.setAttribute('stroke', '#3a2800');
-  spindle.setAttribute('stroke-width', '0.5');
-  turret.appendChild(spindle);
+  // ── Segment face (inner playing area) ────────────────────────────────
+  const playR = rimR;          // radius of coloured segments
+  const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
-  // Finial cap — bright knob at the very top of the turret.
-  const cap = document.createElementNS(svgNS, 'circle');
-  cap.setAttribute('cx', cx);
-  cap.setAttribute('cy', cy);
-  cap.setAttribute('r', '2.6');
-  cap.setAttribute('fill', '#fff5c4');
-  cap.setAttribute('opacity', '0.95');
-  turret.appendChild(cap);
+  WHEEL_SEQUENCE.forEach((n, i) => {
+    const startA = i * segRad - Math.PI / 2;
+    const endA   = startA + segRad;
 
-  // Tiny specular highlight on the cap for polish.
-  const capShine = document.createElementNS(svgNS, 'ellipse');
-  capShine.setAttribute('cx', cx - 0.7);
-  capShine.setAttribute('cy', cy - 0.9);
-  capShine.setAttribute('rx', '1');
-  capShine.setAttribute('ry', '0.5');
-  capShine.setAttribute('fill', 'rgba(255,255,255,0.95)');
-  turret.appendChild(capShine);
+    g.beginPath();
+    g.moveTo(cx, cy);
+    g.arc(cx, cy, playR, startA, endA);
+    g.closePath();
 
-  svg.appendChild(turret);
+    const c = colorOf(n);
+    g.fillStyle = c === 'red' ? '#c0392b' : c === 'black' ? '#1a1a1a' : '#27ae60';
+    g.fill();
 
-  wheel.appendChild(svg);
+    // Divider lines in gold
+    g.strokeStyle = '#ffd700';
+    g.lineWidth = 0.5 * (R / 150);
+    g.stroke();
+  });
+
+  // ── Number labels ─────────────────────────────────────────────────────
+  const labelR = playR * 0.78;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = '#ffffff';
+
+  WHEEL_SEQUENCE.forEach((n, i) => {
+    const midA = i * segRad - Math.PI / 2 + segRad / 2;
+    const lx = cx + labelR * Math.cos(midA);
+    const ly = cy + labelR * Math.sin(midA);
+
+    g.save();
+    g.translate(lx, ly);
+    g.rotate(midA + Math.PI / 2);
+    g.font = `800 ${Math.round(R * 0.068)}px 'Segoe UI', Arial, sans-serif`;
+    g.fillText(String(n), 0, 0);
+    g.restore();
+  });
+
+  // ── Ball track groove ─────────────────────────────────────────────────
+  const trackR = playR + (R - playR) * 0.45;
+  g.beginPath();
+  g.arc(cx, cy, trackR, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(255, 230, 150, 0.4)';
+  g.lineWidth = 2 * (R / 200);
+  g.stroke();
+
+  // ── Turret (center hub + arms + bulbs) ────────────────────────────────
+  const hubR = R * 0.10;
+
+  // Arms
+  const armLen = R * 0.26;
+  const armW   = R * 0.035;
+  const armGrad = g.createLinearGradient(cx, cy - armLen, cx, cy);
+  armGrad.addColorStop(0, '#fff5c4');
+  armGrad.addColorStop(0.5, '#ffd700');
+  armGrad.addColorStop(1, '#a07700');
+  for (let a = 0; a < 4; a++) {
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(a * Math.PI / 2);
+    g.beginPath();
+    g.roundRect(-armW / 2, -armLen, armW, armLen, armW / 3);
+    g.fillStyle = armGrad;
+    g.fill();
+    g.strokeStyle = '#3a2800';
+    g.lineWidth = 0.5;
+    g.stroke();
+    // Bulb at tip
+    g.beginPath();
+    g.arc(0, -armLen, R * 0.028, 0, Math.PI * 2);
+    const bulbGrad = g.createRadialGradient(-1, -armLen - 2, 1, 0, -armLen, R * 0.028);
+    bulbGrad.addColorStop(0, '#fff5c4');
+    bulbGrad.addColorStop(0.4, '#ffd700');
+    bulbGrad.addColorStop(1, '#4a3500');
+    g.fillStyle = bulbGrad;
+    g.fill();
+    g.restore();
+  }
+
+  // Base disc
+  g.beginPath();
+  g.arc(cx, cy, hubR, 0, Math.PI * 2);
+  g.fillStyle = '#1f1500';
+  g.fill();
+  g.strokeStyle = '#ffd700';
+  g.lineWidth = 1;
+  g.stroke();
+
+  // Spindle
+  const spindleGrad = g.createRadialGradient(cx - R*0.02, cy - R*0.02, 1, cx, cy, hubR * 0.7);
+  spindleGrad.addColorStop(0, '#fff5c4');
+  spindleGrad.addColorStop(0.4, '#ffd700');
+  spindleGrad.addColorStop(1, '#4a3500');
+  g.beginPath();
+  g.arc(cx, cy, hubR * 0.7, 0, Math.PI * 2);
+  g.fillStyle = spindleGrad;
+  g.fill();
+
+  // Cap knob
+  g.beginPath();
+  g.arc(cx, cy, hubR * 0.3, 0, Math.PI * 2);
+  g.fillStyle = '#fff5c4';
+  g.fill();
+
+  // Sheen overlay — top-left highlight for depth
+  const sheen = g.createRadialGradient(cx - R * 0.15, cy - R * 0.2, 0, cx, cy, R * 0.9);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.15)');
+  sheen.addColorStop(0.4, 'rgba(255,255,255,0)');
+  sheen.addColorStop(1, 'rgba(0,0,0,0.3)');
+  g.beginPath();
+  g.arc(cx, cy, R, 0, Math.PI * 2);
+  g.fillStyle = sheen;
+  g.fill();
+
+  _offscreenCanvas = oc;
+  return oc;
+}
+
+/**
+ * Draw one frame of the wheel onto the live canvas.
+ * Applies the current wheel rotation angle, then draws the ball on top.
+ */
+function drawWheelFrame() {
+  const canvas = document.getElementById('tv-wheel-canvas');
+  if (!canvas) return;
+
+  // Resize canvas to match its CSS display size
+  const rect = canvas.getBoundingClientRect();
+  const size = Math.round(rect.width * (window.devicePixelRatio || 1));
+  if (canvas.width !== size) {
+    canvas.width  = size;
+    canvas.height = size;
+    _offscreenCanvas = null; // force rebuild at new size
+  }
+  if (size === 0) return;
+
+  const g  = canvas.getContext('2d');
+  const cx = size / 2, cy = size / 2;
+  const R  = size / 2;
+
+  g.clearRect(0, 0, size, size);
+
+  // Cast shadow
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,0.7)';
+  g.shadowBlur  = R * 0.18;
+  g.shadowOffsetY = R * 0.14;
+  g.beginPath();
+  g.arc(cx, cy, R, 0, Math.PI * 2);
+  g.fillStyle = '#000';
+  g.fill();
+  g.restore();
+
+  // Draw rotating wheel face
+  const face = buildOffscreenWheel(size);
+  g.save();
+  g.translate(cx, cy);
+  g.rotate(_wheel.angle);
+  g.translate(-cx, -cy);
+  g.drawImage(face, 0, 0);
+  g.restore();
+
+  // Ball
+  if (_ball.visible) {
+    const trackR  = (R * 0.875) * (_ball.outerR + (R > 0 ? 0 : 0)); // use actual radius
+    const ballOrbitR = R * _ball.radius;
+
+    // Settle bounce: small radial oscillation
+    let bounceOffset = 0;
+    if (_ball.settling && _ball.settleT < 0.6) {
+      const t = _ball.settleT / 0.6;
+      bounceOffset = Math.sin(t * Math.PI * 3) * R * 0.03 * (1 - t);
+    }
+
+    const bx = cx + (ballOrbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);
+    const by = cy + (ballOrbitR + bounceOffset) * Math.sin(-_ball.angle - Math.PI / 2);
+    const br = Math.max(4, R * 0.038);
+
+    // Ball shadow
+    g.save();
+    g.shadowColor = 'rgba(0,0,0,0.6)';
+    g.shadowBlur  = br * 1.5;
+    g.shadowOffsetX = br * 0.4;
+    g.shadowOffsetY = br * 0.6;
+
+    // Ball body — ivory gradient
+    const ballGrad = g.createRadialGradient(bx - br * 0.3, by - br * 0.35, br * 0.05, bx, by, br);
+    ballGrad.addColorStop(0, '#ffffff');
+    ballGrad.addColorStop(0.35, '#fff8e7');
+    ballGrad.addColorStop(0.85, '#b8a888');
+    ballGrad.addColorStop(1, '#5e5443');
+    g.beginPath();
+    g.arc(bx, by, br, 0, Math.PI * 2);
+    g.fillStyle = ballGrad;
+    g.fill();
+    g.restore();
+
+    // Specular highlight
+    g.beginPath();
+    g.arc(bx - br * 0.28, by - br * 0.3, br * 0.28, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.fill();
+  }
+}
+
+/** Start the render loop (runs every frame, draws idle wheel + ball). */
+function startWheelRenderLoop() {
+  if (_rafId) return; // already running
+  function loop() {
+    drawWheelFrame();
+    _rafId = requestAnimationFrame(loop);
+  }
+  _rafId = requestAnimationFrame(loop);
+}
+
+/** Stop the render loop (called on cleanup). */
+function stopWheelRenderLoop() {
+  if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+}
+
+function buildWheel() {
+  // Canvas is built lazily in drawWheelFrame — just start the render loop.
+  startWheelRenderLoop();
 }
 
 /* ======= RENDER HELPERS ======= */
@@ -631,6 +845,8 @@ function renderTotalBets() {
 function cleanupAndGoHome() {
   stopCountdown();
   if (_spinAnimationTimer) { clearTimeout(_spinAnimationTimer); _spinAnimationTimer = null; }
+  stopSpinSound(200);
+  stopWheelRenderLoop();
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   clearSession();
   roomCode = null;

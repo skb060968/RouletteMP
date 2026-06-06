@@ -344,108 +344,13 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   filter: blur(8px);
   z-index: 0;
 }
-.tv-wheel {
+.tv-wheel-canvas {
   width: 100%;
   height: 100%;
+  display: block;
   border-radius: 50%;
-  transform: rotateX(14deg);
-  transform-style: preserve-3d;
-  /* Layered metallic gold rim — multiple alternating bright/dark inset rings
-   * read as a turned brass bezel with real thickness. The big offset drop
-   * shadow gives the wheel a sense of body sitting above the table. */
-  box-shadow:
-    /* Cast shadow on the table — tall offset sells thickness */
-    0 28px 56px rgba(0, 0, 0, 0.75),
-    0 8px 16px rgba(0, 0, 0, 0.55),
-    /* Outer gold rim — multiple alternating rings = turned brass */
-    inset 0 0 0 3px #2a1f08,
-    inset 0 0 0 6px #ffe27a,
-    inset 0 0 0 9px #c69511,
-    inset 0 0 0 12px #6a4d04,
-    inset 0 0 0 14px #ffd966,
-    inset 0 0 0 17px #8a6a13,
-    inset 0 0 0 19px #c69511,
-    inset 0 0 0 21px #3a2800,
-    /* Bowl effect — light from top, shadow at bottom = dished face */
-    inset 0 14px 28px rgba(255, 240, 200, 0.22),
-    inset 0 -18px 36px rgba(0, 0, 0, 0.55),
-    inset 0 0 60px rgba(0, 0, 0, 0.35);
-  background: #1a1a1a;
-}
-/* Recessed ball track — the depression where the ball circulates between
- * the rim and the numbered segments. Sits on top of the SVG so the numbers
- * still show through, but its dark inner edge + bright outer highlight reads
- * as a real groove in the metal. */
-.tv-wheel::before {
-  content: '';
-  position: absolute;
-  inset: 5%;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 3;
-  box-shadow:
-    /* Outer bright rim of the track */
-    inset 0 0 0 2px rgba(255, 230, 150, 0.55),
-    /* Inner recess shadow — deepest at the bottom, sells "dropped in" */
-    inset 0 6px 14px rgba(0, 0, 0, 0.55),
-    inset 0 -3px 8px rgba(255, 240, 200, 0.18);
-}
-/* Glassy sheen overlay — soft white highlight from the top-left. */
-.tv-wheel::after {
-  content: '';
-  position: absolute;
-  inset: 6%;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.28), transparent 45%),
-    radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.25), transparent 55%);
-  pointer-events: none;
-  z-index: 5;
-  mix-blend-mode: screen;
-}
-.wheel-svg { width: 100%; height: 100%; display: block; position: relative; z-index: 2; }
-
-/* ===== Orbiting ball =====
- * The ball spins around the wheel in the OPPOSITE direction at decreasing
- * speed, then settles on the winning segment with a tiny bounce. We do this
- * with a wrapper that rotates and a child .tv-ball that's offset from center.
- */
-.tv-ball-orbit {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 4;
-  transform: rotateX(14deg);
-  transform-style: preserve-3d;
-  /* Default: hidden until a spin is in flight. */
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-.tv-ball-orbit.spinning { opacity: 1; }
-.tv-ball-orbit.settled { opacity: 1; }
-.tv-ball {
-  position: absolute;
-  top: 8%;            /* ball orbits along the inner ring of the wheel */
-  left: 50%;
-  width: clamp(12px, 2vw, 18px);
-  height: clamp(12px, 2vw, 18px);
-  margin-left: calc(clamp(12px, 2vw, 18px) / -2);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 25%, #ffffff 0%, #fff8e7 35%, #b8a888 90%, #5e5443 100%);
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.6),
-    inset -2px -2px 3px rgba(0, 0, 0, 0.25);
-}
-/* Settle bounce when the ball lands. */
-@keyframes ball-settle {
-  0%   { transform: translateY(0) scale(1); }
-  35%  { transform: translateY(2px) scale(1.06, 0.94); }
-  60%  { transform: translateY(-1px) scale(0.96, 1.04); }
-  100% { transform: translateY(0) scale(1); }
-}
-.tv-ball-orbit.settled .tv-ball {
-  animation: ball-settle 0.5s cubic-bezier(0.3, 0.9, 0.4, 1.4);
+  position: relative;
+  z-index: 2;
 }
 .tv-wheel-pointer {
   position: absolute;
