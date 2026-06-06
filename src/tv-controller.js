@@ -16,7 +16,7 @@ import {
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
-import { initAudio, playSound, stopSpinSound, isMuted, toggleMute } from './sound-manager.js';
+import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
 import { db } from './firebase-config.js';
 import { ref, get } from 'firebase/database';
@@ -852,7 +852,6 @@ function renderTotalBets() {
 function cleanupAndGoHome() {
   stopCountdown();
   if (_spinAnimationTimer) { clearTimeout(_spinAnimationTimer); _spinAnimationTimer = null; }
-  stopSpinSound(200);
   stopWheelRenderLoop();
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   clearSession();
