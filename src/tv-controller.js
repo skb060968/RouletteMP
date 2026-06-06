@@ -409,10 +409,14 @@ function startPhysicsSpin(winningNumber) {
   // Wheel target angle so winning pocket lands under the ball
   const finalWheelAngle = targetAngleForWinning(winningNumber, 5, ballFinalAngle);
 
-  // Exponential deceleration: total_angle = v0/k * (1 - e^(-kT))
-  // Solve: v0 = total_angle * k / (1 - e^(-kT))
-  const k      = 1.1;
-  const k_ball = 0.85;
+  // Physics: exponential deceleration  angle(T) = v0/k * (1 - e^(-kT))
+  // Tuned so both wheel and ball are near-stationary by t=4.5s,
+  // matching the slow-down baked into the sound file from 4.5s to 5s.
+  // At t=4.5s: v(4.5) = v0 * e^(-k*4.5)
+  //   k=1.4 → v = v0 * 0.0015  (0.15% of start — visually stopped)
+  //   k=1.1 → v = v0 * 0.007   (0.7% — near stopped)
+  const k      = 1.3;   // wheel friction
+  const k_ball = 1.1;   // ball friction (slightly less = spins a touch longer)
   const T      = SPIN_DURATION;
 
   // Ball: 7 full CCW turns + final offset
@@ -426,17 +430,15 @@ function startPhysicsSpin(winningNumber) {
   _wheel.spinning = true;
   _ball.angle    = 0;
   _ball.angVel   = v0_ball;
-  _ball.radius   = _ball.outerR; // fixed — no drop
+  _ball.radius   = _ball.outerR;
   _ball.dropped  = false;
   _ball.settling = false;
   _ball.settleT  = 0;
   _ball.visible  = true;
 
-  // We animate for exactly T seconds using elapsed time.
-  // At T we snap to exact values — but to prevent the visible lunge we
-  // stop animating physics slightly before T and let the snap be invisible
-  // because the ball is already very close to its target.
-  const SNAP_EARLY = 0.15; // stop physics 150ms early so ball is near target
+  // Snap at exactly T — with k=1.1+ the ball travels < 0.01 rad in the
+  // last 150ms so the jump is sub-pixel and invisible.
+  const SNAP_EARLY = 0.05; // only 50ms early — nearly invisible at this friction
 
   let elapsed  = 0;
   let lastTime = performance.now();
