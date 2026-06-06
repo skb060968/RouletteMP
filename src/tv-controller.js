@@ -373,16 +373,21 @@ async function triggerSpin() {
 
 /**
  * Compute the target wheel angle (radians, clockwise) so that the
- * winning segment's centre sits exactly at the top (12 o'clock = pointer).
- * Add extra full spins for theatrics.
+ * winning segment's centre lands at a given ball position angle.
+ *
+ * ballFinalAngle: where the ball ends up, in radians CCW from top (0 = top).
+ * The ball drawn at angle A CCW from top sits at A clockwise from top on screen.
+ * The wheel segment idx has its centre at (idx+0.5)*segRad CW from top at rest.
+ * After wheel rotates CW by W, segment centre is at (idx+0.5)*segRad - W from top.
+ * We need that to equal ballFinalAngle:
+ *   W = (idx+0.5)*segRad - ballFinalAngle  (mod 2π, positive)
  */
-function targetAngleForWinning(winningNumber, extraSpins = 5) {
+function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
   const idx = WHEEL_SEQUENCE.indexOf(winningNumber);
   if (idx < 0) return extraSpins * Math.PI * 2;
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
-  // Segment idx centre is at (idx + 0.5)*segRad clockwise from top.
-  // We need to rotate CW so that centre lands at 0 (top).
-  const target = ((Math.PI * 2) - (idx + 0.5) * segRad + Math.PI * 2) % (Math.PI * 2);
+  const segCenter = (idx + 0.5) * segRad;
+  const target = ((segCenter - ballFinalAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
   return extraSpins * Math.PI * 2 + target;
 }
 
@@ -395,21 +400,23 @@ function targetAngleForWinning(winningNumber, extraSpins = 5) {
 function startPhysicsSpin(winningNumber) {
   const SPIN_DURATION = 5.0; // seconds — matches spin-loop.mp3
 
-  // Work out final wheel angle
-  const finalWheelAngle = targetAngleForWinning(winningNumber, 5);
+  // Pick a random final ball position (avoid exactly top/bottom for realism)
+  // ballFinalAngle is CCW from top in radians — this is where the ball visually stops.
+  const ballFinalAngle = (Math.PI * 0.15) + Math.random() * (Math.PI * 1.7);
 
-  // Physics approach: use exponential deceleration.
-  // angle(t) = v0/k * (1 - e^(-kt)) where k = friction coefficient.
-  // We want angle(T) = finalWheelAngle.  Pick k then solve for v0.
-  const k = 1.1; // friction — higher = faster deceleration
-  const T = SPIN_DURATION;
-  const v0_wheel = finalWheelAngle * k / (1 - Math.exp(-k * T));
+  // Compute wheel final angle so the winning pocket lands exactly under the ball
+  const finalWheelAngle = targetAngleForWinning(winningNumber, 5, ballFinalAngle);
 
-  // Ball starts at 0 (top), spins CCW faster, decelerates to also stop at top
-  // (7 full CCW turns + back to top = 7 * 2π for CCW motion)
-  const ballTotalAngle = 7 * Math.PI * 2; // 7 counter-clockwise full turns
-  const k_ball = 0.85; // ball decelerates slightly slower → drops late
-  const v0_ball = ballTotalAngle * k_ball / (1 - Math.exp(-k_ball * T));
+  // Physics: exponential deceleration  angle(T) = v0/k * (1 - e^(-kT))
+  // Solve for v0 given desired total angle and duration T.
+  const k      = 1.1;
+  const k_ball = 0.85;
+  const T      = SPIN_DURATION;
+
+  // Ball total travel = 7 full CCW turns + random final offset
+  const ballTotalAngle = 7 * Math.PI * 2 + ballFinalAngle;
+  const v0_wheel = finalWheelAngle  * k      / (1 - Math.exp(-k      * T));
+  const v0_ball  = ballTotalAngle   * k_ball / (1 - Math.exp(-k_ball * T));
 
   // Reset state
   _wheel.angle   = 0;
@@ -460,7 +467,7 @@ function startPhysicsSpin(winningNumber) {
         _wheel.angle   = finalWheelAngle % (Math.PI * 2);
         _wheel.angVel  = 0;
         _wheel.spinning = false;
-        _ball.angle    = 0; // ball ends at top = 12 o'clock = pointer
+        _ball.angle    = ballFinalAngle; // ball ends at its random position
         _ball.angVel   = 0;
         _ball.radius   = _ball.pocketR;
         _ball.dropped  = true;
