@@ -227,13 +227,15 @@ export async function applyPayouts(roomCode, updates) {
   await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), all));
 }
 
-/** Push a number into the lastResults array (capped at last 10). */
-export async function pushResult(roomCode, winningNumber, currentResults) {
+/** Push a number into the lastResults array (capped at last 10).
+ *  roundNumber is passed in explicitly so it keeps incrementing past 10
+ *  even though lastResults is capped. */
+export async function pushResult(roomCode, winningNumber, currentResults, currentRoundNumber) {
   const next = [...(currentResults || []), winningNumber].slice(-10);
   await firebaseRetry(() =>
     update(ref(db, `${ROOM_PATH}/${roomCode}/game`), {
       lastResults: next,
-      roundNumber: (currentResults?.length || 0) + 1,
+      roundNumber: (currentRoundNumber || 0) + 1,
     })
   );
 }

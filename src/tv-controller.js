@@ -401,7 +401,7 @@ async function onSpinSettled(winningNumber) {
     updates[`payouts/${k}`] = payouts[k];
   });
   await applyPayouts(roomCode, updates);
-  await pushResult(roomCode, winningNumber, firebaseSnapshot.game?.lastResults || []);
+  await pushResult(roomCode, winningNumber, firebaseSnapshot.game?.lastResults || [], firebaseSnapshot.game?.roundNumber || 0);
 
   // Reveal UI
   const color = colorOf(winningNumber);
