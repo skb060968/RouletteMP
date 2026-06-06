@@ -401,44 +401,46 @@ function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
  * Total duration matches the 5s sound file.
  */
 function startPhysicsSpin(winningNumber) {
-  const SPIN_DURATION = 5.0; // seconds — matches spin-loop.mp3
+  const SPIN_DURATION = 5.0;
 
-  // Pick a random final ball position (avoid exactly top/bottom for realism)
-  // ballFinalAngle is CCW from top in radians — this is where the ball visually stops.
+  // Random final ball position (avoid top/bottom)
   const ballFinalAngle = (Math.PI * 0.15) + Math.random() * (Math.PI * 1.7);
 
-  // Compute wheel final angle so the winning pocket lands exactly under the ball
+  // Wheel target angle so winning pocket lands under the ball
   const finalWheelAngle = targetAngleForWinning(winningNumber, 5, ballFinalAngle);
 
-  // Physics: exponential deceleration  angle(T) = v0/k * (1 - e^(-kT))
-  // Solve for v0 given desired total angle and duration T.
+  // Exponential deceleration: total_angle = v0/k * (1 - e^(-kT))
+  // Solve: v0 = total_angle * k / (1 - e^(-kT))
   const k      = 1.1;
   const k_ball = 0.85;
   const T      = SPIN_DURATION;
 
-  // Ball total travel = 7 full CCW turns + random final offset
+  // Ball: 7 full CCW turns + final offset
   const ballTotalAngle = 7 * Math.PI * 2 + ballFinalAngle;
   const v0_wheel = finalWheelAngle  * k      / (1 - Math.exp(-k      * T));
   const v0_ball  = ballTotalAngle   * k_ball / (1 - Math.exp(-k_ball * T));
 
-  // Reset state
+  // Reset state — ball stays on outer track the whole time
   _wheel.angle   = 0;
   _wheel.angVel  = v0_wheel;
   _wheel.spinning = true;
   _ball.angle    = 0;
   _ball.angVel   = v0_ball;
-  _ball.radius   = _ball.outerR;
+  _ball.radius   = _ball.outerR; // fixed — no drop
   _ball.dropped  = false;
   _ball.settling = false;
   _ball.settleT  = 0;
   _ball.visible  = true;
 
-  let elapsed = 0;
-  let lastTime = performance.now();
-  let settled = false;
+  // We animate for exactly T seconds using elapsed time.
+  // At T we snap to exact values — but to prevent the visible lunge we
+  // stop animating physics slightly before T and let the snap be invisible
+  // because the ball is already very close to its target.
+  const SNAP_EARLY = 0.15; // stop physics 150ms early so ball is near target
 
-  // Drop threshold: ball drops when angVel falls to this fraction of v0
-  const DROP_VEL = v0_ball * 0.07;
+  let elapsed  = 0;
+  let lastTime = performance.now();
+  let settled  = false;
 
   function frame(now) {
     const dt = Math.min((now - lastTime) / 1000, 0.05);
@@ -446,55 +448,34 @@ function startPhysicsSpin(winningNumber) {
     elapsed += dt;
 
     if (!settled) {
-      // Exponential deceleration: vel *= e^(-k*dt)
-      _wheel.angVel = v0_wheel * Math.exp(-k * elapsed);
-      _ball.angVel  = v0_ball  * Math.exp(-k_ball * elapsed);
-
-      // Integrate angles
-      _wheel.angle += _wheel.angVel * dt;
-      _ball.angle  += _ball.angVel  * dt;
-
-      // Drop ball inward when it slows enough
-      if (!_ball.dropped && _ball.angVel < DROP_VEL) {
-        _ball.dropped = true;
-      }
-
-      // Smoothly move ball radius inward once dropped
-      if (_ball.dropped) {
-        _ball.radius += (_ball.pocketR - _ball.radius) * Math.min(1, dt * 8);
-      }
-
-      // After SPIN_DURATION snap to exact final positions and trigger settle
-      if (elapsed >= T) {
+      if (elapsed >= T - SNAP_EARLY) {
+        // Snap to exact final values — ball is within ~1 pocket of target
+        // so the jump is imperceptible
         settled = true;
         _wheel.angle   = finalWheelAngle % (Math.PI * 2);
         _wheel.angVel  = 0;
         _wheel.spinning = false;
         _ball.angle    = ballFinalAngle;
         _ball.angVel   = 0;
-        _ball.radius   = _ball.pocketR;
-        _ball.dropped  = true;
+        _ball.radius   = _ball.outerR;
         _ball.settling = true;
         _ball.settleT  = 0;
-
-        // Verify: segment centre on screen should equal ball screen angle
-        const segRad_ = (Math.PI * 2) / WHEEL_SEQUENCE.length;
-        const idx_ = WHEEL_SEQUENCE.indexOf(winningNumber);
-        const segCenter_ = (idx_ + 0.5) * segRad_;
-        const segOnScreen = segCenter_ - Math.PI / 2 + (_wheel.angle);
-        const ballOnScreen = -ballFinalAngle - Math.PI / 2;
-        console.log(`[SNAP] winning=${winningNumber} segOnScreen=${(segOnScreen%(Math.PI*2)+Math.PI*2)%(Math.PI*2) * 180/Math.PI |0}° ballOnScreen=${(ballOnScreen%(Math.PI*2)+Math.PI*2)%(Math.PI*2) * 180/Math.PI |0}° (must match)`);
 
         drawWheelFrame();
         onSpinSettled(winningNumber);
         return;
       }
+
+      // Exponential deceleration
+      _wheel.angVel = v0_wheel * Math.exp(-k      * elapsed);
+      _ball.angVel  = v0_ball  * Math.exp(-k_ball * elapsed);
+      _wheel.angle += _wheel.angVel * dt;
+      _ball.angle  += _ball.angVel  * dt;
     }
 
-    // Settle bounce animation
     if (_ball.settling) {
       _ball.settleT += dt;
-      if (_ball.settleT > 0.6) _ball.settling = false;
+      if (_ball.settleT > 0.5) _ball.settling = false;
     }
 
     drawWheelFrame();
@@ -755,16 +736,15 @@ function drawWheelFrame() {
   g.drawImage(face, 0, 0);
   g.restore();
 
-  // Ball
+  // Ball — stays on outer track, small settle pulse when it stops
   if (_ball.visible) {
-    const trackR  = (R * 0.875) * (_ball.outerR + (R > 0 ? 0 : 0)); // use actual radius
-    const ballOrbitR = R * _ball.radius;
+    const ballOrbitR = R * _ball.outerR;
 
-    // Settle bounce: small radial oscillation
+    // Settle pulse: tiny radial shimmer when ball lands
     let bounceOffset = 0;
-    if (_ball.settling && _ball.settleT < 0.6) {
-      const t = _ball.settleT / 0.6;
-      bounceOffset = Math.sin(t * Math.PI * 3) * R * 0.03 * (1 - t);
+    if (_ball.settling && _ball.settleT < 0.5) {
+      const t = _ball.settleT / 0.5;
+      bounceOffset = Math.sin(t * Math.PI * 2.5) * R * 0.018 * (1 - t);
     }
 
     const bx = cx + (ballOrbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);

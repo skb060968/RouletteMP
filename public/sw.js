@@ -1,6 +1,6 @@
 /* Roulette MP PWA Service Worker */
 
-const CACHE_NAME = "roulette-mp-v24";
+const CACHE_NAME = "roulette-mp-v25";
 
 const STATIC_ASSETS = [
   "/",
