@@ -373,21 +373,24 @@ async function triggerSpin() {
 
 /**
  * Compute the target wheel angle (radians, clockwise) so that the
- * winning segment's centre lands at a given ball position angle.
+ * winning segment's centre lands exactly under the ball.
  *
- * ballFinalAngle: where the ball ends up, in radians CCW from top (0 = top).
- * The ball drawn at angle A CCW from top sits at A clockwise from top on screen.
- * The wheel segment idx has its centre at (idx+0.5)*segRad CW from top at rest.
- * After wheel rotates CW by W, segment centre is at (idx+0.5)*segRad - W from top.
- * We need that to equal ballFinalAngle:
- *   W = (idx+0.5)*segRad - ballFinalAngle  (mod 2π, positive)
+ * Canvas rotation model:
+ *   g.rotate(W) shifts all drawn content by +W in screen angle.
+ *   Segment i centre in face = (i+0.5)*segRad - π/2.
+ *   Segment i centre on screen after wheel rotates W = (i+0.5)*segRad - π/2 + W.
+ *
+ * Ball screen angle = -ballFinalAngle - π/2  (ball.angle increases → moves CW).
+ *
+ * Winning condition:  segCenter - π/2 + W  =  -ballFinalAngle - π/2
+ *   → W = -segCenter - ballFinalAngle  (mod 2π, positive)
  */
 function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
   const idx = WHEEL_SEQUENCE.indexOf(winningNumber);
   if (idx < 0) return extraSpins * Math.PI * 2;
-  const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
+  const segRad    = (Math.PI * 2) / WHEEL_SEQUENCE.length;
   const segCenter = (idx + 0.5) * segRad;
-  const target = ((segCenter - ballFinalAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  const target    = ((-segCenter - ballFinalAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
   return extraSpins * Math.PI * 2 + target;
 }
 
@@ -467,12 +470,21 @@ function startPhysicsSpin(winningNumber) {
         _wheel.angle   = finalWheelAngle % (Math.PI * 2);
         _wheel.angVel  = 0;
         _wheel.spinning = false;
-        _ball.angle    = ballFinalAngle; // ball ends at its random position
+        _ball.angle    = ballFinalAngle;
         _ball.angVel   = 0;
         _ball.radius   = _ball.pocketR;
         _ball.dropped  = true;
         _ball.settling = true;
         _ball.settleT  = 0;
+
+        // Verify: segment centre on screen should equal ball screen angle
+        const segRad_ = (Math.PI * 2) / WHEEL_SEQUENCE.length;
+        const idx_ = WHEEL_SEQUENCE.indexOf(winningNumber);
+        const segCenter_ = (idx_ + 0.5) * segRad_;
+        const segOnScreen = segCenter_ - Math.PI / 2 + (_wheel.angle);
+        const ballOnScreen = -ballFinalAngle - Math.PI / 2;
+        console.log(`[SNAP] winning=${winningNumber} segOnScreen=${(segOnScreen%(Math.PI*2)+Math.PI*2)%(Math.PI*2) * 180/Math.PI |0}° ballOnScreen=${(ballOnScreen%(Math.PI*2)+Math.PI*2)%(Math.PI*2) * 180/Math.PI |0}° (must match)`);
+
         drawWheelFrame();
         onSpinSettled(winningNumber);
         return;
