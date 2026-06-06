@@ -395,10 +395,10 @@ function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
 }
 
 /**
- * Launch a physics-based spin.
- * Wheel: clockwise, decelerates with exponential friction to land winning number at top.
- * Ball: counter-clockwise, faster start, decelerates independently, drops inward near stop.
- * Total duration matches the 5s sound file.
+ * Launch a time-based eased spin.
+ * Uses a power ease-out curve (progress = 1 - (1-t)^p) which guarantees
+ * EXACT final position with zero drift or snap lunge — the ball arrives
+ * smoothly at ballFinalAngle without any hard jump.
  */
 function startPhysicsSpin(winningNumber) {
   const SPIN_DURATION = 5.0;
@@ -406,77 +406,55 @@ function startPhysicsSpin(winningNumber) {
   // Random final ball position (avoid top/bottom)
   const ballFinalAngle = (Math.PI * 0.15) + Math.random() * (Math.PI * 1.7);
 
-  // Wheel target angle so winning pocket lands under the ball
+  // Wheel target so winning pocket lands exactly under the ball
   const finalWheelAngle = targetAngleForWinning(winningNumber, 5, ballFinalAngle);
 
-  // Physics: exponential deceleration  angle(T) = v0/k * (1 - e^(-kT))
-  // Tuned so both wheel and ball are near-stationary by t=4.5s,
-  // matching the slow-down baked into the sound file from 4.5s to 5s.
-  // At t=4.5s: v(4.5) = v0 * e^(-k*4.5)
-  //   k=1.4 → v = v0 * 0.0015  (0.15% of start — visually stopped)
-  //   k=1.1 → v = v0 * 0.007   (0.7% — near stopped)
-  const k      = 1.3;   // wheel friction
-  const k_ball = 1.1;   // ball friction (slightly less = spins a touch longer)
-  const T      = SPIN_DURATION;
-
-  // Ball: 7 full CCW turns + final offset
+  // Ball total travel = 7 full CCW turns + random final offset
   const ballTotalAngle = 7 * Math.PI * 2 + ballFinalAngle;
-  const v0_wheel = finalWheelAngle  * k      / (1 - Math.exp(-k      * T));
-  const v0_ball  = ballTotalAngle   * k_ball / (1 - Math.exp(-k_ball * T));
 
-  // Reset state — ball stays on outer track the whole time
+  // Power ease-out: progress(t) = 1 - (1 - t/T)^p
+  // p=4 → at t=4.5s (90% through): progress = 1 - 0.1^4 = 99.99% done ✅
+  //       at t=3s   (60% through): progress = 1 - 0.4^4 = 97.4% done ✅ (fast early)
+  // This naturally matches the sound file's slowdown at 4.5–5s.
+  const POWER = 4;
+
+  // Reset state
   _wheel.angle   = 0;
-  _wheel.angVel  = v0_wheel;
   _wheel.spinning = true;
   _ball.angle    = 0;
-  _ball.angVel   = v0_ball;
   _ball.radius   = _ball.outerR;
   _ball.dropped  = false;
   _ball.settling = false;
   _ball.settleT  = 0;
   _ball.visible  = true;
 
-  // Snap at exactly T — with k=1.1+ the ball travels < 0.01 rad in the
-  // last 150ms so the jump is sub-pixel and invisible.
-  const SNAP_EARLY = 0.05; // only 50ms early — nearly invisible at this friction
-
-  let elapsed  = 0;
-  let lastTime = performance.now();
-  let settled  = false;
+  const startTime = performance.now();
+  let settled = false;
 
   function frame(now) {
-    const dt = Math.min((now - lastTime) / 1000, 0.05);
-    lastTime = now;
-    elapsed += dt;
+    const elapsed = (now - startTime) / 1000;
+    const t = Math.min(elapsed / SPIN_DURATION, 1.0);
+    const progress = 1 - Math.pow(1 - t, POWER);
 
-    if (!settled) {
-      if (elapsed >= T - SNAP_EARLY) {
-        // Snap to exact final values — ball is within ~1 pocket of target
-        // so the jump is imperceptible
-        settled = true;
-        _wheel.angle   = finalWheelAngle % (Math.PI * 2);
-        _wheel.angVel  = 0;
-        _wheel.spinning = false;
-        _ball.angle    = ballFinalAngle;
-        _ball.angVel   = 0;
-        _ball.radius   = _ball.outerR;
-        _ball.settling = true;
-        _ball.settleT  = 0;
+    _wheel.angle = finalWheelAngle * progress;
+    _ball.angle  = ballTotalAngle  * progress;
 
-        drawWheelFrame();
-        onSpinSettled(winningNumber);
-        return;
-      }
-
-      // Exponential deceleration
-      _wheel.angVel = v0_wheel * Math.exp(-k      * elapsed);
-      _ball.angVel  = v0_ball  * Math.exp(-k_ball * elapsed);
-      _wheel.angle += _wheel.angVel * dt;
-      _ball.angle  += _ball.angVel  * dt;
+    if (t >= 1.0 && !settled) {
+      settled = true;
+      // Snap to exact values — guaranteed to equal the computed targets
+      _wheel.angle   = finalWheelAngle % (Math.PI * 2);
+      _wheel.angVel  = 0;
+      _wheel.spinning = false;
+      _ball.angle    = ballFinalAngle;
+      _ball.settling = true;
+      _ball.settleT  = 0;
+      drawWheelFrame();
+      onSpinSettled(winningNumber);
+      return;
     }
 
     if (_ball.settling) {
-      _ball.settleT += dt;
+      _ball.settleT = (now - startTime) / 1000 - SPIN_DURATION;
       if (_ball.settleT > 0.5) _ball.settling = false;
     }
 
