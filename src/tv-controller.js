@@ -11,15 +11,13 @@ import {
   createRoomAsTv, listenRoom, setupTvDisconnectHandler,
   openBets as fbOpenBets, closeBets as fbCloseBets,
   revealWinningNumber, applyPayouts, pushResult, applyBalanceUpdates,
-  endGame as fbEndGame, deleteRoom as fbDeleteRoom, rejoinRoom,
-  firebaseRetry, MAX_PLAYERS,
+  deleteRoom as fbDeleteRoom, rejoinRoom,
+  MAX_PLAYERS,
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
-import { db } from './firebase-config.js';
-import { ref, get } from 'firebase/database';
 
 const SESSION_KEY = 'roulette_mp_session';
 
@@ -29,26 +27,21 @@ let firebaseSnapshot = {};
 let _autoCloseTimer = null;
 let _countdownTimer = null;
 let _spinAnimationTimer = null;
-let _resultsShown = false;
 
 /* ======= CANVAS WHEEL STATE ======= */
 // Physics state for the canvas-based wheel + ball renderer
 const _wheel = {
-  angle: 0,        // current wheel rotation in radians (clockwise)
-  angVel: 0,       // current angular velocity rad/s
-  targetAngle: 0,  // final resting angle
+  angle: 0,
+  angVel: 0,
   spinning: false,
 };
 const _ball = {
-  angle: 0,        // current ball position in radians (counter-clockwise from top)
-  angVel: 0,       // angular velocity (positive = counter-clockwise)
-  radius: 0,       // current orbit radius as fraction of wheel radius (0..1)
-  outerR: 0.88,    // outer track radius fraction
-  pocketR: 0.76,   // pocket (settled) radius fraction
-  dropped: false,  // has ball dropped into pocket yet
-  settling: false, // bounce animation in progress
-  settleT: 0,      // settle animation time
-  settleStart: 0,  // performance.now() when settle began
+  angle: 0,
+  angVel: 0,
+  dropped: false,
+  settling: false,
+  settleT: 0,
+  settleStart: 0,
   visible: false,
 };
 let _rafId = null;           // requestAnimationFrame handle for wheel loop
@@ -560,8 +553,6 @@ function buildOffscreenWheel(size) {
   const rPlainInner = R * 0.500;  // plain pocket ring inner
   const rSepOuter   = R * 0.500;  // gold separator outer
   const rSepInner   = R * 0.482;  // gold separator inner / inner bowl outer
-  const rHub        = R * 0.082;  // hub disc radius (unused, turret self-sized)
-  const rKnob       = R * 0.034;  // hub knob radius (unused, turret self-sized)
 
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
@@ -1029,7 +1020,6 @@ function cleanupAndGoHome() {
   clearSession();
   roomCode = null;
   firebaseSnapshot = {};
-  _resultsShown = false;
   delete document.body.dataset.mode;
   showScreen('home');
 }

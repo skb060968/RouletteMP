@@ -14,7 +14,6 @@ import {
 } from './firebase-sync.js';
 import { BET_TYPES, betKey, payoutMultiplier, resolveBets } from './bet-validator.js';
 import { colorOf } from './wheel.js';
-import { totalCommitted } from './game-engine.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast } from './platform-ui.js';
 

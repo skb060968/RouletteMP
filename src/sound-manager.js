@@ -112,7 +112,7 @@ export function isMuted() {
   } catch (_) { return false; }
 }
 
-export function setMuted(muted) {
+function setMuted(muted) {
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (_) {}
 }
 

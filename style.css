@@ -352,18 +352,6 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   position: relative;
   z-index: 2;
 }
-.tv-wheel-pointer {
-  position: absolute;
-  top: -8px; left: 50%;
-  transform: translateX(-50%);
-  width: 0; height: 0;
-  border-left: 16px solid transparent;
-  border-right: 16px solid transparent;
-  border-top: 26px solid #ffd700;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
-  z-index: 10;
-}
-
 .tv-winning-tag {
   position: absolute;
   bottom: -42px; left: 50%;
@@ -462,7 +450,6 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
 }
 
-.tv-player-strip,
 .tv-players-side {
   display: grid;
   grid-template-columns: 1fr;

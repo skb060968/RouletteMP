@@ -46,25 +46,3 @@ export function columnOf(n) {
   if (n < 1 || n > 36) return null;
   return ((n - 1) % 3) + 1;
 }
-
-/**
- * Returns the number of degrees a wheel must rotate from its current
- * 0-degree position so that the given winningNumber sits under the pointer.
- * Adds full extra rotations for spin theatrics.
- *
- * The winning segment's CENTER lands under the pointer (not its leading
- * edge) — without the half-segment offset the pointer ends up on the line
- * separating two pockets, which looks wrong.
- *
- * @param {number} winningNumber  0..36
- * @param {number} extraSpins     full 360-degree spins to add for animation
- * @returns {number} degrees (positive)
- */
-export function rotationForWinning(winningNumber, extraSpins = 5) {
-  const idx = WHEEL_SEQUENCE.indexOf(winningNumber);
-  if (idx < 0) return 0;
-  const segmentDeg = 360 / WHEEL_SEQUENCE.length;
-  // Aim for the center of segment idx by offsetting by half a segment.
-  const targetDeg = (360 - (idx + 0.5) * segmentDeg + 360) % 360;
-  return extraSpins * 360 + targetDeg;
-}
