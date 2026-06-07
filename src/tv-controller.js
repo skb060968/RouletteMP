@@ -457,7 +457,6 @@ function startPhysicsSpin(winningNumber) {
       _ball.settleT = (now - startTime) / 1000 - SPIN_DURATION;
       if (_ball.settleT > 0.5) _ball.settling = false;
     }
-
     drawWheelFrame();
     _rafId = requestAnimationFrame(frame);
   }
@@ -816,20 +815,29 @@ function drawWheelFrame() {
   g.drawImage(face, 0, 0);
   g.restore();
 
-  // Ball — stays on outer track, small settle pulse when it stops
+  // Ball — orbits outer track during spin, settles into pocket band
   if (_ball.visible) {
-    // Orbit at the ball track between outer rim and pocket band
-    const ballOrbitR = R * 0.815; // sits in the gap between rRimInner2 and rPocketOuter
+    // During spin: outer track between gold rim and number band (R*0.97 to R*0.90)
+    // When settled: centre of number band pocket
+    const trackOrbitR  = R * 0.935; // outer track
+    const pocketOrbitR = R * 0.81;  // centre of number pocket band
 
-    // Settle pulse: tiny radial shimmer when ball lands
+    // Smoothly interpolate inward when settling
+    let orbitR = trackOrbitR;
+    if (_ball.settling) {
+      const t = Math.min(_ball.settleT / 0.4, 1.0);
+      orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * (1 - Math.pow(1 - t, 2));
+    }
+
+    // Settle pulse: tiny radial shimmer
     let bounceOffset = 0;
     if (_ball.settling && _ball.settleT < 0.5) {
       const t = _ball.settleT / 0.5;
-      bounceOffset = Math.sin(t * Math.PI * 2.5) * R * 0.018 * (1 - t);
+      bounceOffset = Math.sin(t * Math.PI * 2.5) * R * 0.012 * (1 - t);
     }
 
-    const bx = cx + (ballOrbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);
-    const by = cy + (ballOrbitR + bounceOffset) * Math.sin(-_ball.angle - Math.PI / 2);
+    const bx = cx + (orbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);
+    const by = cy + (orbitR + bounceOffset) * Math.sin(-_ball.angle - Math.PI / 2);
     const br = Math.max(4, R * 0.038);
 
     // Ball shadow
