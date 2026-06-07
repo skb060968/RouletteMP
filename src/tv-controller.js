@@ -455,7 +455,10 @@ function startPhysicsSpin(winningNumber) {
 
     if (_ball.settling) {
       _ball.settleT = (performance.now() - (_ball.settleStart || performance.now())) / 1000;
-      if (_ball.settleT > 0.6) _ball.settling = false;
+      if (_ball.settleT > 0.6) {
+        _ball.settling = false;
+        _ball.dropped  = true; // stay at pocketOrbitR permanently
+      }
     }
     drawWheelFrame();
     _rafId = requestAnimationFrame(frame);
@@ -552,16 +555,18 @@ function buildOffscreenWheel(size) {
   const rGoldInner  = R * 0.78;   // inner edge of gold rim / outer edge of track
   const rTrackInner = R * 0.755;  // inner edge of track / outer edge of number band
   const rNumOuter   = R * 0.755;  // number band outer
-  const rNumInner   = R * 0.605;  // number band inner
-  const rSepOuter   = R * 0.605;  // gold separator outer
-  const rSepInner   = R * 0.585;  // gold separator inner / inner bowl outer
-  const rHub        = R * 0.090;  // hub disc radius
-  const rKnob       = R * 0.038;  // hub knob radius
-  const rSpoke      = R * 0.550;  // how far spokes reach into bowl
+  const rNumInner   = R * 0.620;  // number band inner
+  const rPlainOuter = R * 0.610;  // plain pocket ring outer
+  const rPlainInner = R * 0.500;  // plain pocket ring inner
+  const rSepOuter   = R * 0.500;  // gold separator outer
+  const rSepInner   = R * 0.482;  // gold separator inner / inner bowl outer
+  const rHub        = R * 0.082;  // hub disc radius
+  const rKnob       = R * 0.034;  // hub knob radius
+  const rArmLen     = R * 0.420;  // turret arm length (to edge of inner bowl)
 
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
-  // ── 1. Full mahogany base — outer bowl fills everything ──────────────────
+  // ── 1. Full mahogany base ────────────────────────────────────────────────
   const mahoGrad = g.createRadialGradient(cx - R*0.15, cy - R*0.18, R*0.05, cx, cy, R);
   mahoGrad.addColorStop(0,   '#a0321a');
   mahoGrad.addColorStop(0.3, '#841e0a');
@@ -569,6 +574,12 @@ function buildOffscreenWheel(size) {
   mahoGrad.addColorStop(1,   '#3a0800');
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2);
   g.fillStyle = mahoGrad; g.fill();
+
+  // Golden ring at outer periphery
+  g.beginPath(); g.arc(cx, cy, R - R*0.008, 0, Math.PI * 2);
+  g.strokeStyle = '#ffd700';
+  g.lineWidth = R * 0.016;
+  g.stroke();
 
   // ── 2. Gold rim ──────────────────────────────────────────────────────────
   const rimGrad = g.createRadialGradient(cx, cy, rGoldInner, cx, cy, rGoldOuter);
@@ -650,6 +661,38 @@ function buildOffscreenWheel(size) {
     g.restore();
   });
 
+  // ── 4b. Plain pocket ring (ball settles here — no numbers) ──────────────
+  g.beginPath(); g.arc(cx, cy, rPlainOuter, 0, Math.PI * 2);
+  g.fillStyle = '#0a0a0a'; g.fill();
+
+  WHEEL_SEQUENCE.forEach((n, i) => {
+    const startA = i * segRad - Math.PI / 2;
+    const endA   = startA + segRad;
+    const midA   = startA + segRad / 2;
+    g.beginPath();
+    g.arc(cx, cy, rPlainOuter - R*0.002, startA + 0.008, endA - 0.008);
+    g.arc(cx, cy, rPlainInner + R*0.002, endA - 0.008, startA + 0.008, true);
+    g.closePath();
+    const c = colorOf(n);
+    if (c === 'green') {
+      g.fillStyle = '#155222';
+    } else if (c === 'red') {
+      const rg = g.createLinearGradient(
+        cx + rPlainInner * Math.cos(midA), cy + rPlainInner * Math.sin(midA),
+        cx + rPlainOuter * Math.cos(midA), cy + rPlainOuter * Math.sin(midA));
+      rg.addColorStop(0, '#5a0000'); rg.addColorStop(0.5, '#aa1010'); rg.addColorStop(1, '#5a0000');
+      g.fillStyle = rg;
+    } else {
+      g.fillStyle = '#080808';
+    }
+    g.fill();
+    // Gold dividers
+    g.beginPath();
+    g.moveTo(cx + rPlainInner * Math.cos(startA), cy + rPlainInner * Math.sin(startA));
+    g.lineTo(cx + rPlainOuter * Math.cos(startA), cy + rPlainOuter * Math.sin(startA));
+    g.strokeStyle = '#c8960c'; g.lineWidth = R * 0.004; g.stroke();
+  });
+
   // ── 5. Gold separator ring ────────────────────────────────────────────────
   const sepGrad = g.createRadialGradient(cx, cy, rSepInner, cx, cy, rSepOuter);
   sepGrad.addColorStop(0, '#a07000'); sepGrad.addColorStop(0.5, '#ffd700'); sepGrad.addColorStop(1, '#a07000');
@@ -694,30 +737,36 @@ function buildOffscreenWheel(size) {
     g.restore();
   });
 
-  // ── 7. × Spoke arms (4 at 45°/135°/225°/315°) ────────────────────────────
-  const spokeW = R * 0.028;
+  // ── 7. + Turret — 4 arms at 0°/90°/180°/270° with bulbs ──────────────────
+  const armW = R * 0.032;
   for (let i = 0; i < 4; i++) {
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    const sg = g.createLinearGradient(
-      cx + rHub * Math.cos(a),   cy + rHub * Math.sin(a),
-      cx + rSpoke * Math.cos(a), cy + rSpoke * Math.sin(a));
-    sg.addColorStop(0,   '#fff8c0');
-    sg.addColorStop(0.3, '#ffd700');
-    sg.addColorStop(0.7, '#c8960c');
-    sg.addColorStop(1,   '#8a6000');
+    const a = i * Math.PI / 2; // 0, 90, 180, 270
+    const ag = g.createLinearGradient(
+      cx + rHub * Math.cos(a),    cy + rHub * Math.sin(a),
+      cx + rArmLen * Math.cos(a), cy + rArmLen * Math.sin(a));
+    ag.addColorStop(0, '#fff8c0'); ag.addColorStop(0.3, '#ffd700');
+    ag.addColorStop(0.7, '#c8960c'); ag.addColorStop(1, '#8a6000');
     g.save();
     g.translate(cx, cy);
     g.rotate(a);
     g.beginPath();
-    g.roundRect(-spokeW / 2, rHub * 0.95, spokeW, rSpoke - rHub * 0.95, spokeW / 4);
-    g.fillStyle = sg; g.fill();
+    g.moveTo(-armW / 2, rHub * 0.9);
+    g.lineTo(-armW * 0.4, rArmLen - R * 0.012);
+    g.lineTo(0, rArmLen + R * 0.005);
+    g.lineTo(armW * 0.4, rArmLen - R * 0.012);
+    g.lineTo(armW / 2, rHub * 0.9);
+    g.closePath();
+    g.fillStyle = ag; g.fill();
     g.strokeStyle = 'rgba(80,50,0,0.4)'; g.lineWidth = 0.5; g.stroke();
     // Bulb at tip
-    const br = R * 0.026;
-    g.beginPath(); g.arc(0, rSpoke, br, 0, Math.PI * 2);
-    const bg = g.createRadialGradient(-br*0.3, rSpoke - br*0.4, 1, 0, rSpoke, br);
+    const br2 = R * 0.028;
+    g.beginPath(); g.arc(0, rArmLen, br2, 0, Math.PI * 2);
+    const bg = g.createRadialGradient(-br2*0.3, rArmLen - br2*0.4, 1, 0, rArmLen, br2);
     bg.addColorStop(0, '#fffacc'); bg.addColorStop(0.35, '#ffd700'); bg.addColorStop(1, '#6a4800');
     g.fillStyle = bg; g.fill();
+    // Bulb specular
+    g.beginPath(); g.arc(-br2*0.25, rArmLen - br2*0.3, br2*0.28, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.65)'; g.fill();
     g.restore();
   }
 
@@ -797,23 +846,22 @@ function drawWheelFrame() {
   if (_ball.visible) {
     // During spin: centre of ball track groove (rGoldInner to rTrackInner) = (0.78+0.755)/2
     const trackOrbitR  = R * 0.768;
-    // Settled: centre of number band (rNumOuter+rNumInner)/2 = (0.755+0.605)/2
-    const pocketOrbitR = R * 0.680;
+    // Settled: centre of plain pocket ring (rPlainOuter+rPlainInner)/2 = (0.610+0.500)/2
+    const pocketOrbitR = R * 0.555;
 
     // Smoothly interpolate inward when settling — one-way ease-out, no bounce back
     let orbitR = trackOrbitR;
     if (_ball.settling) {
       const t = Math.min(_ball.settleT / 0.5, 1.0);
-      // ease-out cubic: starts fast, slows to a stop exactly at pocketOrbitR
       const ease = 1 - Math.pow(1 - t, 3);
       orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * ease;
+    } else if (_ball.dropped) {
+      // Fully settled — stay at pocket radius permanently
+      orbitR = pocketOrbitR;
     }
 
-    // No bounce offset — just a clean drop
-    const bounceOffset = 0;
-
-    const bx = cx + (orbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);
-    const by = cy + (orbitR + bounceOffset) * Math.sin(-_ball.angle - Math.PI / 2);
+    const bx = cx + orbitR * Math.cos(-_ball.angle - Math.PI / 2);
+    const by = cy + orbitR * Math.sin(-_ball.angle - Math.PI / 2);
     const br = Math.max(4, R * 0.038);
 
     // Ball shadow
