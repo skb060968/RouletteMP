@@ -523,13 +523,17 @@ async function onSpinSettled(winningNumber) {
 /* ======= CANVAS WHEEL RENDERER ======= */
 
 /**
- * Pre-render the static wheel face matching the reference image:
- * - Deep burgundy outer bowl with gold rim
- * - Thin number ring (narrow rectangles) near outer edge
- * - Numbers upright (not rotated)
- * - Gold diamond markers at cardinal points
- * - Large dark inner bowl with gold spoke dividers
- * - Ornate gold hub with angled spokes
+ * Pre-render the static wheel face.
+ *
+ * Layers from outside to inside (matching reference image):
+ *   1. Outer gold rim
+ *   2. Ball track groove (dark, where ball orbits)
+ *   3. Number band — 37 labeled red/black/green pockets
+ *   4. Inner gold ring separator
+ *   5. Plain pocket ring — 37 alternating red/black (no numbers, ball rests here)
+ *   6. Inner gold ring separator
+ *   7. Mahogany inner bowl with diagonal gold spoke lines
+ *   8. Gold hub with angled spokes + knob
  */
 function buildOffscreenWheel(size) {
   if (_offscreenCanvas && _canvasSize === size) return _offscreenCanvas;
@@ -541,229 +545,233 @@ function buildOffscreenWheel(size) {
   const cx = size / 2, cy = size / 2;
   const R  = size / 2;
 
-  // ── Radii (as fractions of R) ─────────────────────────────────────────
-  const rOuter      = R;           // outermost edge
-  const rRim1       = R * 0.97;    // outer gold rim inner edge
-  const rRimInner   = R * 0.93;    // inner gold rim outer edge
-  const rRimInner2  = R * 0.90;    // inner gold rim inner edge (pocket outer)
-  const rPocketOuter= R * 0.90;    // outer edge of number pockets
-  const rPocketInner= R * 0.72;    // inner edge of number pockets
-  const rBowlOuter  = R * 0.72;    // outer edge of inner bowl
-  const rBowlInner  = R * 0.22;    // inner bowl ends / hub starts
-  const rHub        = R * 0.16;    // hub disc radius
+  // ── Radii ──────────────────────────────────────────────────────────────
+  const rOuter        = R;         // outermost gold rim edge
+  const rTrackOuter   = R * 0.965; // ball track outer edge
+  const rTrackInner   = R * 0.895; // ball track inner edge / number band outer
+  const rNumOuter     = R * 0.895; // number band outer
+  const rNumInner     = R * 0.735; // number band inner
+  const rSep1         = R * 0.735; // gold separator ring outer
+  const rPlainOuter   = R * 0.715; // plain pocket ring outer
+  const rPlainInner   = R * 0.590; // plain pocket ring inner
+  const rSep2         = R * 0.590; // inner gold separator
+  const rBowlOuter    = R * 0.570; // mahogany bowl outer
+  const rBowlInner    = R * 0.195; // mahogany bowl inner / hub area
+  const rHub          = R * 0.145; // hub disc
 
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
-  // ── 1. Outer gold rim ────────────────────────────────────────────────
-  const rimGrad = g.createRadialGradient(cx, cy, rRim1 * 0.7, cx, cy, rOuter);
-  rimGrad.addColorStop(0,   '#c8960c');
-  rimGrad.addColorStop(0.3, '#ffd700');
-  rimGrad.addColorStop(0.6, '#e8b800');
-  rimGrad.addColorStop(0.8, '#ffd700');
-  rimGrad.addColorStop(1,   '#a07000');
+  // ── 1. Outer gold rim ───────────────────────────────────────────────────
+  const rimGrad = g.createRadialGradient(cx, cy, rTrackOuter, cx, cy, rOuter);
+  rimGrad.addColorStop(0,   '#b8860b');
+  rimGrad.addColorStop(0.25,'#ffd700');
+  rimGrad.addColorStop(0.5, '#ffe066');
+  rimGrad.addColorStop(0.75,'#ffd700');
+  rimGrad.addColorStop(1,   '#8a6200');
   g.beginPath(); g.arc(cx, cy, rOuter, 0, Math.PI * 2);
   g.fillStyle = rimGrad; g.fill();
 
-  // ── 2. Thin dark ring between outer rim and number band ───────────────
-  g.beginPath(); g.arc(cx, cy, rRim1, 0, Math.PI * 2);
-  g.fillStyle = '#1a0800'; g.fill();
+  // ── 2. Ball track groove ────────────────────────────────────────────────
+  const trackGrad = g.createRadialGradient(cx, cy, rTrackInner, cx, cy, rTrackOuter);
+  trackGrad.addColorStop(0,   '#0a0400');
+  trackGrad.addColorStop(0.4, '#1a0c02');
+  trackGrad.addColorStop(0.8, '#0d0600');
+  trackGrad.addColorStop(1,   '#000000');
+  g.beginPath(); g.arc(cx, cy, rTrackOuter, 0, Math.PI * 2);
+  g.fillStyle = trackGrad; g.fill();
 
-  // ── 3. Inner gold accent ring ─────────────────────────────────────────
-  const rimGrad2 = g.createRadialGradient(cx, cy, rRimInner * 0.95, cx, cy, rRimInner);
-  rimGrad2.addColorStop(0, '#ffd700');
-  rimGrad2.addColorStop(1, '#a07000');
-  g.beginPath(); g.arc(cx, cy, rRimInner, 0, Math.PI * 2);
-  g.fillStyle = rimGrad2; g.fill();
+  // Subtle groove highlight
+  g.beginPath(); g.arc(cx, cy, (rTrackOuter + rTrackInner) / 2, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(255,220,100,0.18)';
+  g.lineWidth = R * 0.012;
+  g.stroke();
 
-  // ── 4. Number pockets ring ────────────────────────────────────────────
-  // Dark base for pocket band
-  g.beginPath(); g.arc(cx, cy, rPocketOuter, 0, Math.PI * 2);
+  // ── 3. Number band ──────────────────────────────────────────────────────
+  g.beginPath(); g.arc(cx, cy, rNumOuter, 0, Math.PI * 2);
   g.fillStyle = '#111'; g.fill();
 
   WHEEL_SEQUENCE.forEach((n, i) => {
     const startA = i * segRad - Math.PI / 2;
     const endA   = startA + segRad;
+    const midA   = startA + segRad / 2;
 
-    // Pocket rectangle as arc sector
+    // Pocket arc
     g.beginPath();
-    g.arc(cx, cy, rPocketOuter - R * 0.004, startA + 0.012, endA - 0.012);
-    g.arc(cx, cy, rPocketInner + R * 0.004, endA - 0.012, startA + 0.012, true);
+    g.arc(cx, cy, rNumOuter - R * 0.003, startA + 0.01, endA - 0.01);
+    g.arc(cx, cy, rNumInner + R * 0.003, endA - 0.01, startA + 0.01, true);
     g.closePath();
 
     const c = colorOf(n);
     if (c === 'green') {
-      const gGrad = g.createLinearGradient(
-        cx + rPocketInner * Math.cos((startA+endA)/2),
-        cy + rPocketInner * Math.sin((startA+endA)/2),
-        cx + rPocketOuter * Math.cos((startA+endA)/2),
-        cy + rPocketOuter * Math.sin((startA+endA)/2)
-      );
-      gGrad.addColorStop(0, '#1a6b30');
-      gGrad.addColorStop(0.5, '#27ae60');
-      gGrad.addColorStop(1, '#1a6b30');
-      g.fillStyle = gGrad;
+      const gg = g.createLinearGradient(
+        cx + rNumInner * Math.cos(midA), cy + rNumInner * Math.sin(midA),
+        cx + rNumOuter * Math.cos(midA), cy + rNumOuter * Math.sin(midA));
+      gg.addColorStop(0, '#155222'); gg.addColorStop(0.5, '#27ae60'); gg.addColorStop(1, '#155222');
+      g.fillStyle = gg;
     } else if (c === 'red') {
-      const rGrad = g.createLinearGradient(
-        cx + rPocketInner * Math.cos((startA+endA)/2),
-        cy + rPocketInner * Math.sin((startA+endA)/2),
-        cx + rPocketOuter * Math.cos((startA+endA)/2),
-        cy + rPocketOuter * Math.sin((startA+endA)/2)
-      );
-      rGrad.addColorStop(0, '#8b0000');
-      rGrad.addColorStop(0.5, '#cc1111');
-      rGrad.addColorStop(1, '#8b0000');
-      g.fillStyle = rGrad;
+      const rg = g.createLinearGradient(
+        cx + rNumInner * Math.cos(midA), cy + rNumInner * Math.sin(midA),
+        cx + rNumOuter * Math.cos(midA), cy + rNumOuter * Math.sin(midA));
+      rg.addColorStop(0, '#7a0000'); rg.addColorStop(0.5, '#cc1111'); rg.addColorStop(1, '#7a0000');
+      g.fillStyle = rg;
     } else {
-      g.fillStyle = '#111111';
+      g.fillStyle = '#0d0d0d';
     }
     g.fill();
 
-    // Gold divider lines between pockets
+    // Gold dividers
     g.beginPath();
-    g.moveTo(cx + rPocketInner * Math.cos(startA), cy + rPocketInner * Math.sin(startA));
-    g.lineTo(cx + rPocketOuter * Math.cos(startA), cy + rPocketOuter * Math.sin(startA));
+    g.moveTo(cx + rNumInner * Math.cos(startA), cy + rNumInner * Math.sin(startA));
+    g.lineTo(cx + rNumOuter * Math.cos(startA), cy + rNumOuter * Math.sin(startA));
     g.strokeStyle = '#c8960c';
-    g.lineWidth = R * 0.006;
+    g.lineWidth = R * 0.005;
     g.stroke();
   });
 
-  // Inner gold ring border of pocket band
-  const ringGrad = g.createRadialGradient(cx, cy, rPocketInner * 0.98, cx, cy, rPocketInner);
-  ringGrad.addColorStop(0, '#ffd700');
-  ringGrad.addColorStop(1, '#a07000');
-  g.beginPath(); g.arc(cx, cy, rPocketInner, 0, Math.PI * 2);
-  g.strokeStyle = '#c8960c';
-  g.lineWidth = R * 0.018;
-  g.stroke();
-
-  // ── 5. Number labels — upright, inside the pocket ─────────────────────
-  const labelR = (rPocketOuter + rPocketInner) / 2;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
+  // Number labels — upright (radially oriented)
+  const labelR = (rNumOuter + rNumInner) / 2;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
 
   WHEEL_SEQUENCE.forEach((n, i) => {
     const midA = i * segRad - Math.PI / 2 + segRad / 2;
     const lx = cx + labelR * Math.cos(midA);
     const ly = cy + labelR * Math.sin(midA);
-
-    const fontSize = Math.round(R * 0.072);
     g.save();
     g.translate(lx, ly);
-    // Rotate text to be radially upright (pointing away from center)
     g.rotate(midA + Math.PI / 2);
-    g.font = `900 ${fontSize}px Arial, sans-serif`;
-    // Drop shadow for legibility
-    g.shadowColor = 'rgba(0,0,0,0.8)';
-    g.shadowBlur = 3;
+    g.font = `900 ${Math.round(R * 0.065)}px Arial, sans-serif`;
+    g.shadowColor = 'rgba(0,0,0,0.9)'; g.shadowBlur = 3;
     g.fillStyle = '#ffffff';
     g.fillText(String(n), 0, 0);
     g.shadowBlur = 0;
     g.restore();
   });
 
-  // ── 6. Inner bowl — deep burgundy/mahogany ────────────────────────────
-  const bowlGrad = g.createRadialGradient(cx - R*0.1, cy - R*0.1, R*0.05, cx, cy, rBowlOuter);
-  bowlGrad.addColorStop(0,   '#7a1a0a');
-  bowlGrad.addColorStop(0.4, '#5a0e04');
-  bowlGrad.addColorStop(0.8, '#3d0802');
-  bowlGrad.addColorStop(1,   '#2a0500');
+  // ── 4. Gold separator ring ──────────────────────────────────────────────
+  g.beginPath(); g.arc(cx, cy, rSep1, 0, Math.PI * 2);
+  g.strokeStyle = '#c8960c'; g.lineWidth = R * 0.022; g.stroke();
+
+  // ── 5. Plain pocket ring (alternating red/black, no numbers) ───────────
+  g.beginPath(); g.arc(cx, cy, rPlainOuter, 0, Math.PI * 2);
+  g.fillStyle = '#111'; g.fill();
+
+  WHEEL_SEQUENCE.forEach((n, i) => {
+    const startA = i * segRad - Math.PI / 2;
+    const endA   = startA + segRad;
+    const midA   = startA + segRad / 2;
+
+    g.beginPath();
+    g.arc(cx, cy, rPlainOuter - R * 0.003, startA + 0.01, endA - 0.01);
+    g.arc(cx, cy, rPlainInner + R * 0.003, endA - 0.01, startA + 0.01, true);
+    g.closePath();
+
+    const c = colorOf(n);
+    // Plain pockets — same colour as number pocket above but darker/simpler
+    if (c === 'green') {
+      g.fillStyle = '#1a6b30';
+    } else if (c === 'red') {
+      const rg = g.createLinearGradient(
+        cx + rPlainInner * Math.cos(midA), cy + rPlainInner * Math.sin(midA),
+        cx + rPlainOuter * Math.cos(midA), cy + rPlainOuter * Math.sin(midA));
+      rg.addColorStop(0, '#6a0000'); rg.addColorStop(0.5, '#aa0e0e'); rg.addColorStop(1, '#6a0000');
+      g.fillStyle = rg;
+    } else {
+      g.fillStyle = '#0a0a0a';
+    }
+    g.fill();
+
+    // Gold dividers
+    g.beginPath();
+    g.moveTo(cx + rPlainInner * Math.cos(startA), cy + rPlainInner * Math.sin(startA));
+    g.lineTo(cx + rPlainOuter * Math.cos(startA), cy + rPlainOuter * Math.sin(startA));
+    g.strokeStyle = '#c8960c';
+    g.lineWidth = R * 0.005;
+    g.stroke();
+  });
+
+  // ── 6. Inner gold separator ring ────────────────────────────────────────
+  g.beginPath(); g.arc(cx, cy, rSep2, 0, Math.PI * 2);
+  g.strokeStyle = '#c8960c'; g.lineWidth = R * 0.022; g.stroke();
+
+  // ── 7. Mahogany inner bowl ───────────────────────────────────────────────
+  const bowlGrad = g.createRadialGradient(cx - R*0.08, cy - R*0.1, R*0.02, cx, cy, rBowlOuter);
+  bowlGrad.addColorStop(0,   '#8b2010');
+  bowlGrad.addColorStop(0.3, '#6b1508');
+  bowlGrad.addColorStop(0.7, '#4a0d04');
+  bowlGrad.addColorStop(1,   '#2e0700');
   g.beginPath(); g.arc(cx, cy, rBowlOuter, 0, Math.PI * 2);
   g.fillStyle = bowlGrad; g.fill();
 
-  // ── 7. Gold spoke dividers on inner bowl (8 lines) ────────────────────
+  // 8 diagonal gold spoke lines across the bowl
   for (let i = 0; i < 8; i++) {
-    const a = i * Math.PI / 4;
+    const a = (i * Math.PI / 4) + Math.PI / 8;
     g.beginPath();
-    g.moveTo(cx + rBowlInner * Math.cos(a), cy + rBowlInner * Math.sin(a));
-    g.lineTo(cx + rBowlOuter * Math.cos(a), cy + rBowlOuter * Math.sin(a));
-    g.strokeStyle = 'rgba(200,150,12,0.55)';
-    g.lineWidth = R * 0.007;
+    g.moveTo(cx + rBowlInner * 1.1 * Math.cos(a), cy + rBowlInner * 1.1 * Math.sin(a));
+    g.lineTo(cx + rBowlOuter * 0.96 * Math.cos(a), cy + rBowlOuter * 0.96 * Math.sin(a));
+    g.strokeStyle = 'rgba(200,150,12,0.45)';
+    g.lineWidth = R * 0.006;
     g.stroke();
   }
 
-  // ── 8. Gold diamond markers at 4 cardinal points on outer bowl edge ───
-  const diamondPositions = [0, Math.PI/2, Math.PI, Math.PI*3/2];
-  const diamondR = rBowlOuter * 0.985;
-  const dSize = R * 0.038;
-  diamondPositions.forEach(a => {
-    const dx = cx + diamondR * Math.cos(a - Math.PI/2);
-    const dy = cy + diamondR * Math.sin(a - Math.PI/2);
+  // Gold diamond markers at 4 cardinal points on bowl edge
+  [0, Math.PI/2, Math.PI, Math.PI*3/2].forEach(a => {
+    const dx = cx + rBowlOuter * 0.97 * Math.cos(a - Math.PI/2);
+    const dy = cy + rBowlOuter * 0.97 * Math.sin(a - Math.PI/2);
+    const ds = R * 0.032;
     g.save();
     g.translate(dx, dy);
     g.rotate(a);
-    const dGrad = g.createRadialGradient(-dSize*0.2, -dSize*0.3, 0, 0, 0, dSize);
-    dGrad.addColorStop(0, '#fff8c0');
-    dGrad.addColorStop(0.4, '#ffd700');
-    dGrad.addColorStop(1, '#8a6000');
+    const dg = g.createRadialGradient(-ds*0.2, -ds*0.3, 0, 0, 0, ds);
+    dg.addColorStop(0, '#fffacc'); dg.addColorStop(0.4, '#ffd700'); dg.addColorStop(1, '#8a6000');
     g.beginPath();
-    g.moveTo(0, -dSize);
-    g.lineTo(dSize * 0.55, 0);
-    g.lineTo(0, dSize);
-    g.lineTo(-dSize * 0.55, 0);
+    g.moveTo(0, -ds); g.lineTo(ds*0.5, 0); g.lineTo(0, ds); g.lineTo(-ds*0.5, 0);
     g.closePath();
-    g.fillStyle = dGrad;
-    g.fill();
-    g.strokeStyle = '#a07000';
-    g.lineWidth = 0.5;
-    g.stroke();
+    g.fillStyle = dg; g.fill();
     g.restore();
   });
 
-  // ── 9. Hub — gold disc with angled spokes ─────────────────────────────
-  // Spoke shadow base
-  g.beginPath(); g.arc(cx, cy, rHub * 1.35, 0, Math.PI * 2);
-  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fill();
+  // ── 8. Hub — gold disc with angled spokes ───────────────────────────────
+  // Shadow under hub
+  g.beginPath(); g.arc(cx, cy, rHub * 1.4, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(0,0,0,0.4)'; g.fill();
 
-  // 8 angled spokes (like reference image — diagonal, not cross)
-  const spokeAngles = [Math.PI*0.1, Math.PI*0.35, Math.PI*0.6, Math.PI*0.85,
-                       Math.PI*1.1, Math.PI*1.35, Math.PI*1.6, Math.PI*1.85];
-  spokeAngles.forEach(a => {
-    const spokeGrad = g.createLinearGradient(
-      cx + rBowlInner * 0.15 * Math.cos(a), cy + rBowlInner * 0.15 * Math.sin(a),
-      cx + rBowlInner * 0.95 * Math.cos(a), cy + rBowlInner * 0.95 * Math.sin(a)
-    );
-    spokeGrad.addColorStop(0,   '#fff8c0');
-    spokeGrad.addColorStop(0.3, '#ffd700');
-    spokeGrad.addColorStop(0.7, '#c8960c');
-    spokeGrad.addColorStop(1,   '#8a6000');
+  // 8 angled spokes
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4 + Math.PI / 8;
+    const sg = g.createLinearGradient(
+      cx + rHub * 1.1 * Math.cos(a), cy + rHub * 1.1 * Math.sin(a),
+      cx + rBowlInner * 0.88 * Math.cos(a), cy + rBowlInner * 0.88 * Math.sin(a));
+    sg.addColorStop(0, '#fff8c0'); sg.addColorStop(0.35, '#ffd700');
+    sg.addColorStop(0.7, '#c8960c'); sg.addColorStop(1, '#8a6000');
     g.beginPath();
-    g.moveTo(cx + rBowlInner * 0.18 * Math.cos(a), cy + rBowlInner * 0.18 * Math.sin(a));
-    g.lineTo(cx + rBowlInner * 0.92 * Math.cos(a), cy + rBowlInner * 0.92 * Math.sin(a));
-    g.strokeStyle = spokeGrad;
-    g.lineWidth = R * 0.022;
-    g.lineCap = 'round';
-    g.stroke();
-  });
+    g.moveTo(cx + rHub * 1.1 * Math.cos(a), cy + rHub * 1.1 * Math.sin(a));
+    g.lineTo(cx + rBowlInner * 0.88 * Math.cos(a), cy + rBowlInner * 0.88 * Math.sin(a));
+    g.strokeStyle = sg; g.lineWidth = R * 0.02; g.lineCap = 'round'; g.stroke();
+  }
 
   // Hub disc
-  const hubGrad = g.createRadialGradient(cx - rHub*0.3, cy - rHub*0.35, rHub*0.05, cx, cy, rHub);
-  hubGrad.addColorStop(0,   '#fff8c0');
-  hubGrad.addColorStop(0.25,'#ffd700');
-  hubGrad.addColorStop(0.6, '#c8960c');
-  hubGrad.addColorStop(1,   '#6a4800');
+  const hg = g.createRadialGradient(cx - rHub*0.28, cy - rHub*0.32, rHub*0.04, cx, cy, rHub);
+  hg.addColorStop(0, '#fffacc'); hg.addColorStop(0.2, '#ffd700');
+  hg.addColorStop(0.6, '#c8960c'); hg.addColorStop(1, '#6a4800');
   g.beginPath(); g.arc(cx, cy, rHub, 0, Math.PI * 2);
-  g.fillStyle = hubGrad; g.fill();
-  g.strokeStyle = '#8a6000';
-  g.lineWidth = R * 0.008;
-  g.stroke();
+  g.fillStyle = hg; g.fill();
+  g.strokeStyle = '#8a6000'; g.lineWidth = R * 0.007; g.stroke();
 
-  // Hub inner knob
-  const knobGrad = g.createRadialGradient(cx - rHub*0.2, cy - rHub*0.25, 1, cx, cy, rHub*0.45);
-  knobGrad.addColorStop(0, '#ffffff');
-  knobGrad.addColorStop(0.3, '#ffd700');
-  knobGrad.addColorStop(1, '#c8960c');
-  g.beginPath(); g.arc(cx, cy, rHub * 0.45, 0, Math.PI * 2);
-  g.fillStyle = knobGrad; g.fill();
+  // Hub knob
+  const kg = g.createRadialGradient(cx - rHub*0.18, cy - rHub*0.22, 1, cx, cy, rHub*0.42);
+  kg.addColorStop(0, '#ffffff'); kg.addColorStop(0.3, '#ffd700'); kg.addColorStop(1, '#c8960c');
+  g.beginPath(); g.arc(cx, cy, rHub * 0.42, 0, Math.PI * 2);
+  g.fillStyle = kg; g.fill();
 
-  // Hub specular dot
-  g.beginPath(); g.arc(cx - rHub*0.12, cy - rHub*0.15, rHub*0.12, 0, Math.PI * 2);
-  g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
+  // Specular
+  g.beginPath(); g.arc(cx - rHub*0.11, cy - rHub*0.14, rHub*0.11, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255,255,255,0.65)'; g.fill();
 
-  // ── 10. Subtle sheen on entire wheel ──────────────────────────────────
-  const sheen = g.createRadialGradient(cx - R*0.2, cy - R*0.25, 0, cx, cy, R);
-  sheen.addColorStop(0,   'rgba(255,255,255,0.12)');
-  sheen.addColorStop(0.35,'rgba(255,255,255,0.0)');
-  sheen.addColorStop(1,   'rgba(0,0,0,0.25)');
+  // ── 9. Sheen ─────────────────────────────────────────────────────────────
+  const sheen = g.createRadialGradient(cx - R*0.18, cy - R*0.22, 0, cx, cy, R);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.13)');
+  sheen.addColorStop(0.35, 'rgba(255,255,255,0)');
+  sheen.addColorStop(1, 'rgba(0,0,0,0.28)');
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2);
   g.fillStyle = sheen; g.fill();
 
@@ -815,12 +823,12 @@ function drawWheelFrame() {
   g.drawImage(face, 0, 0);
   g.restore();
 
-  // Ball — orbits outer track during spin, settles into pocket band
+  // Ball — orbits outer track during spin, settles into plain pocket ring
   if (_ball.visible) {
-    // During spin: outer track between gold rim and number band (R*0.97 to R*0.90)
-    // When settled: centre of number band pocket
-    const trackOrbitR  = R * 0.935; // outer track
-    const pocketOrbitR = R * 0.81;  // centre of number pocket band
+    // During spin: centre of ball track groove
+    const trackOrbitR  = R * 0.930; // (rTrackOuter+rTrackInner)/2 = (0.965+0.895)/2
+    // Settled: centre of plain pocket ring (rPlainOuter+rPlainInner)/2 = (0.715+0.590)/2
+    const pocketOrbitR = R * 0.652;
 
     // Smoothly interpolate inward when settling
     let orbitR = trackOrbitR;
