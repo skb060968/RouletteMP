@@ -560,9 +560,8 @@ function buildOffscreenWheel(size) {
   const rPlainInner = R * 0.500;  // plain pocket ring inner
   const rSepOuter   = R * 0.500;  // gold separator outer
   const rSepInner   = R * 0.482;  // gold separator inner / inner bowl outer
-  const rHub        = R * 0.082;  // hub disc radius
-  const rKnob       = R * 0.034;  // hub knob radius
-  const rArmLen     = R * 0.420;  // turret arm length (to edge of inner bowl)
+  const rHub        = R * 0.082;  // hub disc radius (unused, turret self-sized)
+  const rKnob       = R * 0.034;  // hub knob radius (unused, turret self-sized)
 
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
@@ -745,94 +744,100 @@ function buildOffscreenWheel(size) {
     g.restore();
   });
 
-  // ── 7. Original-style turret: dark base disc → 4 arms + bulbs → spindle → cap ──
-  // Scale: original SVG viewBox was -100 to 100 (200 units), armLength=38, armWidth=5
-  // We scale to canvas: scale = rSepInner / 100
-  const tScale  = rSepInner / 100;
-  const tArmLen = 38 * tScale;
-  const tArmW   = 5  * tScale;
-  const tBulbR  = 4  * tScale;
-  const tSpindleR = 6  * tScale;
-  const tCapR   = 2.6 * tScale;
+  // ── 7. Turret matching reference: large hub disc + 4 diagonal × arms + ball tips ──
+  // Arms at 45°/135°/225°/315°, thick cylindrical rods, prominent ball ends
+  const tHubR   = rSepInner * 0.28;  // large central hub disc
+  const tArmW2  = rSepInner * 0.055; // arm width (thick rod)
+  const tArmLen2= rSepInner * 0.72;  // arm length from center to ball tip
+  const tBallR  = rSepInner * 0.075; // ball tip radius
 
-  // Dark base disc
-  g.beginPath(); g.arc(cx, cy, 9 * tScale, 0, Math.PI * 2);
-  g.fillStyle = '#1f1500'; g.fill();
-  g.strokeStyle = '#ffd700'; g.lineWidth = 0.6 * tScale; g.stroke();
+  // Hub shadow
+  g.beginPath(); g.arc(cx, cy + tHubR * 0.12, tHubR * 1.05, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fill();
 
-  // 4 arms at 0°/90°/180°/270°
-  for (let a = 0; a < 4; a++) {
-    const angle = a * Math.PI / 2;
-    const armGrad = g.createLinearGradient(cx, cy, cx + tArmLen * Math.cos(angle - Math.PI/2), cy + tArmLen * Math.sin(angle - Math.PI/2));
-    armGrad.addColorStop(0,   '#fff5c4');
-    armGrad.addColorStop(0.5, '#ffd700');
-    armGrad.addColorStop(1,   '#a07700');
+  // 4 diagonal arms first (behind hub disc)
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4; // 45, 135, 225, 315
     g.save();
     g.translate(cx, cy);
-    g.rotate(angle);
-    // Arm rect: x=-tArmW/2, y=-tArmLen, width=tArmW, height=tArmLen
-    g.beginPath();
-    const rx = tArmW / 6; // rounded corners
-    g.roundRect(-tArmW / 2, -tArmLen, tArmW, tArmLen, rx);
-    g.fillStyle = armGrad; g.fill();
-    g.strokeStyle = '#3a2800'; g.lineWidth = 0.3 * tScale; g.stroke();
+    g.rotate(a);
 
-    // Bulb at tip (tip is at (0, -tArmLen) in rotated space)
-    const hubGrad = g.createRadialGradient(
-      -tBulbR * 0.25, -tArmLen - tBulbR * 0.3, tBulbR * 0.05,
-      0, -tArmLen, tBulbR);
-    hubGrad.addColorStop(0,   '#fff5c4');
-    hubGrad.addColorStop(0.35,'#ffd700');
-    hubGrad.addColorStop(0.8, '#a07700');
-    hubGrad.addColorStop(1,   '#4a3500');
-    g.beginPath(); g.arc(0, -tArmLen, tBulbR, 0, Math.PI * 2);
-    g.fillStyle = hubGrad; g.fill();
-    g.strokeStyle = '#3a2800'; g.lineWidth = 0.4 * tScale; g.stroke();
-    // Bulb shine
-    g.beginPath(); g.arc(-1 * tScale, -tArmLen - 1.2 * tScale, 1.2 * tScale, 0, Math.PI * 2);
+    // Rod gradient — gold cylinder look
+    const rodGrad = g.createLinearGradient(-tArmW2, 0, tArmW2, 0);
+    rodGrad.addColorStop(0,    '#6a4800');
+    rodGrad.addColorStop(0.25, '#ffd700');
+    rodGrad.addColorStop(0.5,  '#fffacc');
+    rodGrad.addColorStop(0.75, '#ffd700');
+    rodGrad.addColorStop(1,    '#6a4800');
+
+    g.beginPath();
+    g.roundRect(-tArmW2 / 2, tHubR * 0.6, tArmW2, tArmLen2 - tHubR * 0.6, tArmW2 / 2);
+    g.fillStyle = rodGrad; g.fill();
+
+    // Ball at tip
+    const bx2 = 0, by2 = tArmLen2;
+    const ballGrad = g.createRadialGradient(
+      bx2 - tBallR * 0.3, by2 - tBallR * 0.35, tBallR * 0.05,
+      bx2, by2, tBallR);
+    ballGrad.addColorStop(0,   '#fffacc');
+    ballGrad.addColorStop(0.3, '#ffd700');
+    ballGrad.addColorStop(0.7, '#c8960c');
+    ballGrad.addColorStop(1,   '#6a4800');
+    g.beginPath(); g.arc(bx2, by2, tBallR, 0, Math.PI * 2);
+    g.fillStyle = ballGrad; g.fill();
+    // Ball specular
+    g.beginPath(); g.arc(bx2 - tBallR * 0.3, by2 - tBallR * 0.35, tBallR * 0.3, 0, Math.PI * 2);
     g.fillStyle = 'rgba(255,255,255,0.75)'; g.fill();
+
     g.restore();
   }
 
-  // Spindle (polished pillar at centre)
-  const spindleGrad = g.createRadialGradient(cx - tSpindleR*0.25, cy - tSpindleR*0.3, tSpindleR*0.05, cx, cy, tSpindleR);
-  spindleGrad.addColorStop(0,   '#fff5c4');
-  spindleGrad.addColorStop(0.35,'#ffd700');
-  spindleGrad.addColorStop(0.8, '#a07700');
-  spindleGrad.addColorStop(1,   '#4a3500');
-  g.beginPath(); g.arc(cx, cy, tSpindleR, 0, Math.PI * 2);
-  g.fillStyle = spindleGrad; g.fill();
-  g.strokeStyle = '#3a2800'; g.lineWidth = 0.5 * tScale; g.stroke();
+  // Central hub disc — large, layered gold rings for depth
+  // Outer shadow ring
+  g.beginPath(); g.arc(cx, cy, tHubR * 1.02, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(0,0,0,0.4)'; g.fill();
 
-  // Finial cap — bright knob
-  g.beginPath(); g.arc(cx, cy, tCapR, 0, Math.PI * 2);
-  g.fillStyle = '#fff5c4'; g.globalAlpha = 0.95; g.fill(); g.globalAlpha = 1;
+  // Outer gold ring
+  const hubRing1 = g.createRadialGradient(cx - tHubR*0.2, cy - tHubR*0.25, tHubR*0.1, cx, cy, tHubR);
+  hubRing1.addColorStop(0,   '#fffacc');
+  hubRing1.addColorStop(0.25,'#ffd700');
+  hubRing1.addColorStop(0.6, '#c8960c');
+  hubRing1.addColorStop(1,   '#7a5200');
+  g.beginPath(); g.arc(cx, cy, tHubR, 0, Math.PI * 2);
+  g.fillStyle = hubRing1; g.fill();
 
-  // Cap specular ellipse
-  g.save();
-  g.translate(cx - 0.7 * tScale, cy - 0.9 * tScale);
-  g.scale(1, 0.5);
-  g.beginPath(); g.arc(0, 0, 1 * tScale, 0, Math.PI * 2);
-  g.fillStyle = 'rgba(255,255,255,0.95)'; g.fill();
-  g.restore();
+  // Concentric ring detail (inner raised platform)
+  const iR1 = tHubR * 0.78;
+  g.beginPath(); g.arc(cx, cy, iR1, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(80,50,0,0.6)'; g.lineWidth = tHubR * 0.04; g.stroke();
 
-  // ── 8. Hub disc + knob ────────────────────────────────────────────────────
-  const hg = g.createRadialGradient(cx - rHub*0.3, cy - rHub*0.35, rHub*0.04, cx, cy, rHub);
-  hg.addColorStop(0, '#fffacc'); hg.addColorStop(0.2, '#ffd700');
-  hg.addColorStop(0.6, '#c8960c'); hg.addColorStop(1, '#6a4800');
-  g.beginPath(); g.arc(cx, cy, rHub, 0, Math.PI * 2);
-  g.fillStyle = hg; g.fill();
-  g.strokeStyle = '#8a6000'; g.lineWidth = R * 0.005; g.stroke();
+  const hubRing2 = g.createRadialGradient(cx - iR1*0.25, cy - iR1*0.28, iR1*0.05, cx, cy, iR1 * 0.92);
+  hubRing2.addColorStop(0,   '#fffacc');
+  hubRing2.addColorStop(0.3, '#ffd700');
+  hubRing2.addColorStop(0.7, '#c8960c');
+  hubRing2.addColorStop(1,   '#8a6200');
+  g.beginPath(); g.arc(cx, cy, iR1 * 0.92, 0, Math.PI * 2);
+  g.fillStyle = hubRing2; g.fill();
 
-  const kg = g.createRadialGradient(cx - rKnob*0.3, cy - rKnob*0.35, 1, cx, cy, rKnob);
-  kg.addColorStop(0, '#ffffff'); kg.addColorStop(0.3, '#ffd700'); kg.addColorStop(1, '#c8960c');
-  g.beginPath(); g.arc(cx, cy, rKnob, 0, Math.PI * 2);
-  g.fillStyle = kg; g.fill();
+  // Inner concentric ring
+  const iR2 = tHubR * 0.52;
+  g.beginPath(); g.arc(cx, cy, iR2, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(80,50,0,0.5)'; g.lineWidth = tHubR * 0.035; g.stroke();
 
-  g.beginPath(); g.arc(cx - rKnob*0.28, cy - rKnob*0.32, rKnob*0.28, 0, Math.PI * 2);
+  // Centre knob
+  const knobGrad = g.createRadialGradient(cx - iR2*0.3, cy - iR2*0.35, iR2*0.05, cx, cy, iR2 * 0.85);
+  knobGrad.addColorStop(0,   '#ffffff');
+  knobGrad.addColorStop(0.2, '#fffacc');
+  knobGrad.addColorStop(0.5, '#ffd700');
+  knobGrad.addColorStop(1,   '#c8960c');
+  g.beginPath(); g.arc(cx, cy, iR2 * 0.85, 0, Math.PI * 2);
+  g.fillStyle = knobGrad; g.fill();
+
+  // Top specular highlight
+  g.beginPath(); g.arc(cx - iR2*0.28, cy - iR2*0.32, iR2 * 0.32, 0, Math.PI * 2);
   g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
 
-  // ── 9. Overall sheen ──────────────────────────────────────────────────────
+  // ── 8. Overall sheen ──────────────────────────────────────────────────────
   const sheen = g.createRadialGradient(cx - R*0.2, cy - R*0.25, 0, cx, cy, R);
   sheen.addColorStop(0,   'rgba(255,255,255,0.10)');
   sheen.addColorStop(0.4, 'rgba(255,255,255,0)');
