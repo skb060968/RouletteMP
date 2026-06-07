@@ -245,7 +245,6 @@ function setupGameUi() {
   _ball.settling  = false;
   _ball.angle     = 0;
   _ball.angVel    = 0;
-  _ball.radius    = _ball.outerR;
   // Hide winning-number tag and rien flash
   const tag = document.getElementById('tv-winning-tag');
   if (tag) { tag.classList.remove('show'); tag.innerHTML = ''; }
@@ -416,7 +415,6 @@ function startPhysicsSpin(winningNumber) {
   _wheel.angle   = 0;
   _wheel.spinning = true;
   _ball.angle    = 0;
-  _ball.radius   = _ball.outerR;
   _ball.dropped  = false;
   _ball.settling = false;
   _ball.settleT  = 0;
