@@ -548,27 +548,26 @@ function buildOffscreenWheel(size) {
   // ── Radii ──────────────────────────────────────────────────────────────
   const rOuter        = R;         // outermost gold rim edge
   const rTrackOuter   = R * 0.965; // ball track outer edge
-  const rTrackInner   = R * 0.895; // ball track inner edge / number band outer
-  const rNumOuter     = R * 0.895; // number band outer
-  const rNumInner     = R * 0.735; // number band inner
-  const rSep1         = R * 0.735; // gold separator ring outer
-  const rPlainOuter   = R * 0.715; // plain pocket ring outer
-  const rPlainInner   = R * 0.590; // plain pocket ring inner
-  const rSep2         = R * 0.590; // inner gold separator
-  const rBowlOuter    = R * 0.570; // mahogany bowl outer
+  const rTrackInner   = R * 0.860; // ball track inner edge — wider groove
+  const rNumOuter     = R * 0.860; // number band outer
+  const rNumInner     = R * 0.700; // number band inner
+  const rSep1         = R * 0.700; // gold separator ring outer
+  const rPlainOuter   = R * 0.680; // plain pocket ring outer
+  const rPlainInner   = R * 0.570; // plain pocket ring inner
+  const rSep2         = R * 0.570; // inner gold separator
+  const rBowlOuter    = R * 0.550; // mahogany bowl outer
   const rBowlInner    = R * 0.195; // mahogany bowl inner / hub area
   const rHub          = R * 0.145; // hub disc
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
   // ── 0. Outer mahogany bowl frame (behind gold rim, visible as dark edge) ──
   const mahoOuter = R;
-  const mahoInner = R * 0.96;
-  // Draw as the outermost layer — a deep burgundy frame
+  const mahoInner = R * 0.88; // wider ring (was 0.96)
   const mahoGrad = g.createRadialGradient(cx - R*0.1, cy - R*0.12, R*0.1, cx, cy, mahoOuter);
-  mahoGrad.addColorStop(0,   '#6b1a08');
-  mahoGrad.addColorStop(0.35,'#4a0d04');
-  mahoGrad.addColorStop(0.7, '#2e0700');
-  mahoGrad.addColorStop(1,   '#1a0300');
+  mahoGrad.addColorStop(0,   '#8b2010');  // match inner bowl colour
+  mahoGrad.addColorStop(0.35,'#6b1508');
+  mahoGrad.addColorStop(0.7, '#4a0d04');
+  mahoGrad.addColorStop(1,   '#2e0700');
   g.beginPath(); g.arc(cx, cy, mahoOuter, 0, Math.PI * 2);
   g.fillStyle = mahoGrad; g.fill();
 
@@ -741,23 +740,55 @@ function buildOffscreenWheel(size) {
     g.restore();
   });
 
-  // ── 8. Hub — gold disc with angled spokes ───────────────────────────────
+  // ── 8. Hub — + shaped turret (4 arms at 0/90/180/270°) ────────────────
   // Shadow under hub
-  g.beginPath(); g.arc(cx, cy, rHub * 1.4, 0, Math.PI * 2);
-  g.fillStyle = 'rgba(0,0,0,0.4)'; g.fill();
+  g.beginPath(); g.arc(cx, cy, rHub * 1.6, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fill();
 
-  // 8 angled spokes — from just outside hub to bowl outer edge
-  for (let i = 0; i < 8; i++) {
-    const a = i * Math.PI / 4 + Math.PI / 8;
-    const sg = g.createLinearGradient(
-      cx + rHub * 1.15 * Math.cos(a), cy + rHub * 1.15 * Math.sin(a),
-      cx + rBowlOuter * 0.95 * Math.cos(a), cy + rBowlOuter * 0.95 * Math.sin(a));
-    sg.addColorStop(0, '#fff8c0'); sg.addColorStop(0.35, '#ffd700');
-    sg.addColorStop(0.7, '#c8960c'); sg.addColorStop(1, '#8a6000');
+  const armLen = rBowlOuter * 0.82;
+  const armW   = R * 0.038;
+
+  // 4 arms of the cross
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2;
+    const ag = g.createLinearGradient(
+      cx + rHub * Math.cos(a),   cy + rHub * Math.sin(a),
+      cx + armLen * Math.cos(a), cy + armLen * Math.sin(a));
+    ag.addColorStop(0,   '#fff8c0');
+    ag.addColorStop(0.3, '#ffd700');
+    ag.addColorStop(0.7, '#c8960c');
+    ag.addColorStop(1,   '#8a6000');
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(a);
     g.beginPath();
-    g.moveTo(cx + rHub * 1.15 * Math.cos(a), cy + rHub * 1.15 * Math.sin(a));
-    g.lineTo(cx + rBowlOuter * 0.95 * Math.cos(a), cy + rBowlOuter * 0.95 * Math.sin(a));
-    g.strokeStyle = sg; g.lineWidth = R * 0.022; g.lineCap = 'round'; g.stroke();
+    g.roundRect(-armW / 2, rHub * 0.9, armW, armLen - rHub * 0.9, armW / 3);
+    g.fillStyle = ag;
+    g.fill();
+    g.strokeStyle = '#6a4800';
+    g.lineWidth = 0.5;
+    g.stroke();
+
+    // Bulb at tip
+    const bulbR = R * 0.038;
+    g.beginPath();
+    g.arc(0, armLen, bulbR, 0, Math.PI * 2);
+    const bg = g.createRadialGradient(-bulbR * 0.3, armLen - bulbR * 0.4, 1, 0, armLen, bulbR);
+    bg.addColorStop(0,   '#fffacc');
+    bg.addColorStop(0.35,'#ffd700');
+    bg.addColorStop(1,   '#6a4800');
+    g.fillStyle = bg;
+    g.fill();
+    g.strokeStyle = '#6a4800';
+    g.lineWidth = 0.5;
+    g.stroke();
+
+    // Bulb specular
+    g.beginPath();
+    g.arc(-bulbR * 0.28, armLen - bulbR * 0.32, bulbR * 0.3, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.7)';
+    g.fill();
+    g.restore();
   }
 
   // Hub disc
@@ -836,24 +867,22 @@ function drawWheelFrame() {
 
   // Ball — orbits outer track during spin, settles into plain pocket ring
   if (_ball.visible) {
-    // During spin: centre of ball track groove
-    const trackOrbitR  = R * 0.930; // (rTrackOuter+rTrackInner)/2 = (0.965+0.895)/2
-    // Settled: centre of plain pocket ring (rPlainOuter+rPlainInner)/2 = (0.715+0.590)/2
-    const pocketOrbitR = R * 0.652;
+    // During spin: centre of ball track groove (rTrackOuter+rTrackInner)/2 = (0.965+0.860)/2
+    const trackOrbitR  = R * 0.912;
+    // Settled: centre of plain pocket ring (rPlainOuter+rPlainInner)/2 = (0.680+0.570)/2
+    const pocketOrbitR = R * 0.625;
 
-    // Smoothly interpolate inward when settling
+    // Smoothly interpolate inward when settling — one-way ease-out, no bounce back
     let orbitR = trackOrbitR;
     if (_ball.settling) {
-      const t = Math.min(_ball.settleT / 0.4, 1.0);
-      orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * (1 - Math.pow(1 - t, 2));
+      const t = Math.min(_ball.settleT / 0.5, 1.0);
+      // ease-out cubic: starts fast, slows to a stop exactly at pocketOrbitR
+      const ease = 1 - Math.pow(1 - t, 3);
+      orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * ease;
     }
 
-    // Settle pulse: tiny radial shimmer
-    let bounceOffset = 0;
-    if (_ball.settling && _ball.settleT < 0.5) {
-      const t = _ball.settleT / 0.5;
-      bounceOffset = Math.sin(t * Math.PI * 2.5) * R * 0.012 * (1 - t);
-    }
+    // No bounce offset — just a clean drop
+    const bounceOffset = 0;
 
     const bx = cx + (orbitR + bounceOffset) * Math.cos(-_ball.angle - Math.PI / 2);
     const by = cy + (orbitR + bounceOffset) * Math.sin(-_ball.angle - Math.PI / 2);
