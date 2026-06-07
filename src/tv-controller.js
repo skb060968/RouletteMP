@@ -48,6 +48,7 @@ const _ball = {
   dropped: false,  // has ball dropped into pocket yet
   settling: false, // bounce animation in progress
   settleT: 0,      // settle animation time
+  settleStart: 0,  // performance.now() when settle began
   visible: false,
 };
 let _rafId = null;           // requestAnimationFrame handle for wheel loop
@@ -441,21 +442,20 @@ function startPhysicsSpin(winningNumber) {
 
     if (t >= 1.0 && !settled) {
       settled = true;
-      // Snap to exact values — guaranteed to equal the computed targets
       _wheel.angle   = finalWheelAngle % (Math.PI * 2);
       _wheel.angVel  = 0;
       _wheel.spinning = false;
       _ball.angle    = ballFinalAngle;
       _ball.settling = true;
       _ball.settleT  = 0;
-      drawWheelFrame();
-      onSpinSettled(winningNumber);
-      return;
+      _ball.settleStart = performance.now();
+      onSpinSettled(winningNumber); // fire payout logic immediately
+      // Don't return — keep loop running so settle drop animation plays
     }
 
     if (_ball.settling) {
-      _ball.settleT = (now - startTime) / 1000 - SPIN_DURATION;
-      if (_ball.settleT > 0.5) _ball.settling = false;
+      _ball.settleT = (performance.now() - (_ball.settleStart || performance.now())) / 1000;
+      if (_ball.settleT > 0.6) _ball.settling = false;
     }
     drawWheelFrame();
     _rafId = requestAnimationFrame(frame);
@@ -558,17 +558,28 @@ function buildOffscreenWheel(size) {
   const rBowlOuter    = R * 0.570; // mahogany bowl outer
   const rBowlInner    = R * 0.195; // mahogany bowl inner / hub area
   const rHub          = R * 0.145; // hub disc
-
   const segRad = (Math.PI * 2) / WHEEL_SEQUENCE.length;
 
+  // ── 0. Outer mahogany bowl frame (behind gold rim, visible as dark edge) ──
+  const mahoOuter = R;
+  const mahoInner = R * 0.96;
+  // Draw as the outermost layer — a deep burgundy frame
+  const mahoGrad = g.createRadialGradient(cx - R*0.1, cy - R*0.12, R*0.1, cx, cy, mahoOuter);
+  mahoGrad.addColorStop(0,   '#6b1a08');
+  mahoGrad.addColorStop(0.35,'#4a0d04');
+  mahoGrad.addColorStop(0.7, '#2e0700');
+  mahoGrad.addColorStop(1,   '#1a0300');
+  g.beginPath(); g.arc(cx, cy, mahoOuter, 0, Math.PI * 2);
+  g.fillStyle = mahoGrad; g.fill();
+
   // ── 1. Outer gold rim ───────────────────────────────────────────────────
-  const rimGrad = g.createRadialGradient(cx, cy, rTrackOuter, cx, cy, rOuter);
+  const rimGrad = g.createRadialGradient(cx, cy, rTrackOuter, cx, cy, mahoInner);
   rimGrad.addColorStop(0,   '#b8860b');
   rimGrad.addColorStop(0.25,'#ffd700');
   rimGrad.addColorStop(0.5, '#ffe066');
   rimGrad.addColorStop(0.75,'#ffd700');
   rimGrad.addColorStop(1,   '#8a6200');
-  g.beginPath(); g.arc(cx, cy, rOuter, 0, Math.PI * 2);
+  g.beginPath(); g.arc(cx, cy, mahoInner, 0, Math.PI * 2);
   g.fillStyle = rimGrad; g.fill();
 
   // ── 2. Ball track groove ────────────────────────────────────────────────
@@ -702,14 +713,14 @@ function buildOffscreenWheel(size) {
   g.beginPath(); g.arc(cx, cy, rBowlOuter, 0, Math.PI * 2);
   g.fillStyle = bowlGrad; g.fill();
 
-  // 8 diagonal gold spoke lines across the bowl
+  // 8 diagonal gold spoke lines across the full bowl
   for (let i = 0; i < 8; i++) {
     const a = (i * Math.PI / 4) + Math.PI / 8;
     g.beginPath();
-    g.moveTo(cx + rBowlInner * 1.1 * Math.cos(a), cy + rBowlInner * 1.1 * Math.sin(a));
-    g.lineTo(cx + rBowlOuter * 0.96 * Math.cos(a), cy + rBowlOuter * 0.96 * Math.sin(a));
-    g.strokeStyle = 'rgba(200,150,12,0.45)';
-    g.lineWidth = R * 0.006;
+    g.moveTo(cx + rHub * 1.05 * Math.cos(a), cy + rHub * 1.05 * Math.sin(a));
+    g.lineTo(cx + rBowlOuter * 0.97 * Math.cos(a), cy + rBowlOuter * 0.97 * Math.sin(a));
+    g.strokeStyle = 'rgba(200,150,12,0.55)';
+    g.lineWidth = R * 0.007;
     g.stroke();
   }
 
@@ -735,18 +746,18 @@ function buildOffscreenWheel(size) {
   g.beginPath(); g.arc(cx, cy, rHub * 1.4, 0, Math.PI * 2);
   g.fillStyle = 'rgba(0,0,0,0.4)'; g.fill();
 
-  // 8 angled spokes
+  // 8 angled spokes — from just outside hub to bowl outer edge
   for (let i = 0; i < 8; i++) {
     const a = i * Math.PI / 4 + Math.PI / 8;
     const sg = g.createLinearGradient(
-      cx + rHub * 1.1 * Math.cos(a), cy + rHub * 1.1 * Math.sin(a),
-      cx + rBowlInner * 0.88 * Math.cos(a), cy + rBowlInner * 0.88 * Math.sin(a));
+      cx + rHub * 1.15 * Math.cos(a), cy + rHub * 1.15 * Math.sin(a),
+      cx + rBowlOuter * 0.95 * Math.cos(a), cy + rBowlOuter * 0.95 * Math.sin(a));
     sg.addColorStop(0, '#fff8c0'); sg.addColorStop(0.35, '#ffd700');
     sg.addColorStop(0.7, '#c8960c'); sg.addColorStop(1, '#8a6000');
     g.beginPath();
-    g.moveTo(cx + rHub * 1.1 * Math.cos(a), cy + rHub * 1.1 * Math.sin(a));
-    g.lineTo(cx + rBowlInner * 0.88 * Math.cos(a), cy + rBowlInner * 0.88 * Math.sin(a));
-    g.strokeStyle = sg; g.lineWidth = R * 0.02; g.lineCap = 'round'; g.stroke();
+    g.moveTo(cx + rHub * 1.15 * Math.cos(a), cy + rHub * 1.15 * Math.sin(a));
+    g.lineTo(cx + rBowlOuter * 0.95 * Math.cos(a), cy + rBowlOuter * 0.95 * Math.sin(a));
+    g.strokeStyle = sg; g.lineWidth = R * 0.022; g.lineCap = 'round'; g.stroke();
   }
 
   // Hub disc
