@@ -898,7 +898,7 @@ function drawWheelFrame() {
       orbitR = pocketOrbitR;
     } else {
       const t = _ball._spinT || 0;
-      const driftStart = 0.70; // start drifting inward at 70% of spin
+      const driftStart = 0.50; // start drifting inward at 50% of spin
       const radialT = Math.max(0, (t - driftStart) / (1 - driftStart));
       const radialEase = radialT * radialT; // quadratic — gentle start, firm finish
       orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * radialEase;
