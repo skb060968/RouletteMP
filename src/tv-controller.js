@@ -245,6 +245,7 @@ function setupGameUi() {
   _ball.settling  = false;
   _ball.angle     = 0;
   _ball.angVel    = 0;
+  _ball._spinT    = 0;
   // Hide winning-number tag and rien flash
   const tag = document.getElementById('tv-winning-tag');
   if (tag) { tag.classList.remove('show'); tag.innerHTML = ''; }
@@ -396,19 +397,9 @@ function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
 function startPhysicsSpin(winningNumber) {
   const SPIN_DURATION = 5.0;
 
-  // Random final ball position (avoid top/bottom)
   const ballFinalAngle = (Math.PI * 0.15) + Math.random() * (Math.PI * 1.7);
-
-  // Wheel target so winning pocket lands exactly under the ball
   const finalWheelAngle = targetAngleForWinning(winningNumber, 5, ballFinalAngle);
-
-  // Ball total travel = 7 full CCW turns + random final offset
   const ballTotalAngle = 7 * Math.PI * 2 + ballFinalAngle;
-
-  // Power ease-out: progress(t) = 1 - (1 - t/T)^p
-  // p=4 → at t=4.5s (90% through): progress = 1 - 0.1^4 = 99.99% done ✅
-  //       at t=3s   (60% through): progress = 1 - 0.4^4 = 97.4% done ✅ (fast early)
-  // This naturally matches the sound file's slowdown at 4.5–5s.
   const POWER = 4;
 
   // Reset state
@@ -417,8 +408,10 @@ function startPhysicsSpin(winningNumber) {
   _ball.angle    = 0;
   _ball.dropped  = false;
   _ball.settling = false;
-  _ball.settleT  = 0;
   _ball.visible  = true;
+
+  // Store spin params for drawWheelFrame to use for continuous inward drift
+  _ball._spinT = 0; // current normalised time 0→1 (written each frame)
 
   const startTime = performance.now();
   let settled = false;
@@ -428,6 +421,7 @@ function startPhysicsSpin(winningNumber) {
     const t = Math.min(elapsed / SPIN_DURATION, 1.0);
     const progress = 1 - Math.pow(1 - t, POWER);
 
+    _ball._spinT = t; // expose to drawWheelFrame for radius calculation
     _wheel.angle = finalWheelAngle * progress;
     _ball.angle  = ballTotalAngle  * progress;
 
@@ -437,20 +431,13 @@ function startPhysicsSpin(winningNumber) {
       _wheel.angVel  = 0;
       _wheel.spinning = false;
       _ball.angle    = ballFinalAngle;
-      _ball.settling = true;
-      _ball.settleT  = 0;
-      _ball.settleStart = performance.now();
-      onSpinSettled(winningNumber); // fire payout logic immediately
-      // Don't return — keep loop running so settle drop animation plays
+      _ball._spinT   = 1.0;
+      _ball.dropped  = true; // lock at pocketOrbitR
+      drawWheelFrame();
+      onSpinSettled(winningNumber);
+      return;
     }
 
-    if (_ball.settling) {
-      _ball.settleT = (performance.now() - (_ball.settleStart || performance.now())) / 1000;
-      if (_ball.settleT > 0.6) {
-        _ball.settling = false;
-        _ball.dropped  = true; // stay at pocketOrbitR permanently
-      }
-    }
     drawWheelFrame();
     _rafId = requestAnimationFrame(frame);
   }
@@ -898,22 +885,23 @@ function drawWheelFrame() {
   g.drawImage(face, 0, 0);
   g.restore();
 
-  // Ball — orbits outer track during spin, settles into plain pocket ring
+  // Ball — spirals inward continuously as it decelerates (physics-based path)
   if (_ball.visible) {
-    // During spin: centre of ball track groove (rGoldInner to rTrackInner) = (0.78+0.755)/2
-    const trackOrbitR  = R * 0.768;
-    // Settled: centre of plain pocket ring (rPlainOuter+rPlainInner)/2 = (0.610+0.500)/2
-    const pocketOrbitR = R * 0.555;
+    const trackOrbitR  = R * 0.768; // outer track groove centre
+    const pocketOrbitR = R * 0.555; // plain pocket ring centre
 
-    // Smoothly interpolate inward when settling — one-way ease-out, no bounce back
-    let orbitR = trackOrbitR;
-    if (_ball.settling) {
-      const t = Math.min(_ball.settleT / 0.5, 1.0);
-      const ease = 1 - Math.pow(1 - t, 3);
-      orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * ease;
-    } else if (_ball.dropped) {
-      // Fully settled — stay at pocket radius permanently
+    // Radial drift: stays at trackOrbitR until 70% through spin,
+    // then eases inward quadratically, arriving at pocketOrbitR at t=1.
+    // This gives a natural spiral — no L-shaped path.
+    let orbitR;
+    if (_ball.dropped) {
       orbitR = pocketOrbitR;
+    } else {
+      const t = _ball._spinT || 0;
+      const driftStart = 0.70; // start drifting inward at 70% of spin
+      const radialT = Math.max(0, (t - driftStart) / (1 - driftStart));
+      const radialEase = radialT * radialT; // quadratic — gentle start, firm finish
+      orbitR = trackOrbitR + (pocketOrbitR - trackOrbitR) * radialEase;
     }
 
     const bx = cx + orbitR * Math.cos(-_ball.angle - Math.PI / 2);
