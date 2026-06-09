@@ -335,6 +335,7 @@ function wirePhoneGame() {
   document.querySelectorAll('.chip-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       selectedDenom = parseInt(btn.dataset.denom, 10);
+      if (!Number.isFinite(selectedDenom) || selectedDenom <= 0) selectedDenom = 25;
       document.querySelectorAll('.chip-btn').forEach((b) => b.classList.toggle('selected', b === btn));
     });
   });
@@ -410,17 +411,20 @@ function onBetCellTap(cell) {
   const target = targetRaw == null || targetRaw === '' ? null : parseInt(targetRaw, 10);
   const key = betKey(type, target);
   if (!key) return;
+  // Guard against NaN denomination (rapid tap can corrupt selectedDenom)
+  const denom = Number.isFinite(selectedDenom) && selectedDenom > 0 ? selectedDenom : 0;
+  if (!denom) return;
 
   // Check we're not over-betting
   const currentTotal = totalLocal();
-  if (currentTotal + selectedDenom > (me.chips ?? 0)) {
+  if (currentTotal + denom > (Number(me.chips) || 0)) {
     showToast('Not enough chips for that bet');
     playSound('error', 0.4);
     if (navigator.vibrate) try { navigator.vibrate(40); } catch (_) {}
     return;
   }
 
-  localBets[key] = (localBets[key] || 0) + selectedDenom;
+  localBets[key] = (localBets[key] || 0) + denom;
   playSound('chip', 0.5);
   // Subtle haptic + press-in animation for tactile feedback.
   if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {}
@@ -432,8 +436,8 @@ function onBetCellTap(cell) {
 }
 
 function totalLocal() {
-  return Object.values(localBets).reduce((s, n) => s + n, 0);
-}
+  return Object.values(localBets).reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
+}}
 
 /** Phone-side confetti for the winner. Bursts colors matching the winning
  *  number's color (red/black/green) so it feels themed. */
@@ -515,8 +519,9 @@ function renderBetBoard() {
   const tray = document.getElementById('phone-bet-tray');
   if (tray) {
     const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
-    const balance = me?.chips ?? 0;
+    const balance = Number(me?.chips) || 0;
     const total = totalLocal();
+    const left = Math.max(0, balance - total);
     // Itemized ledger: short label per bet + chip count, plus total/balance
     // pinned to the right. Empty state shows just the balance. The bet count
     // pill shows N bets at a glance so the player always knows their action.
@@ -534,7 +539,7 @@ function renderBetBoard() {
       tray.innerHTML = `
         <span class="ledger-count">${count} bet${count === 1 ? '' : 's'}</span>
         <span class="ledger-items">${items.join('')}</span>
-        <span class="ledger-summary">Bet ${total} · Left ${balance - total}</span>`;
+        <span class="ledger-summary">Bet ${total} · Left ${left}</span>`;
     }
   }
 }
@@ -649,7 +654,7 @@ function renderResultPanel() {
     const cls = net > 0 ? 'won' : net < 0 ? 'lost' : 'flat';
     const sign = net > 0 ? '+' : net < 0 ? '−' : '';
     const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
-    const balance = me?.chips ?? 0;
+    const balance = Number(me?.chips) || 0;
     footerHtml = `
       <div class="rp-footer ${cls}">
         <span class="rp-net-label">Round Net</span>
