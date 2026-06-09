@@ -437,7 +437,7 @@ function onBetCellTap(cell) {
 
 function totalLocal() {
   return Object.values(localBets).reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
-}}
+}
 
 /** Phone-side confetti for the winner. Bursts colors matching the winning
  *  number's color (red/black/green) so it feels themed. */
