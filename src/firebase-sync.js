@@ -259,6 +259,19 @@ export async function endGame(roomCode) {
   );
 }
 
+/**
+ * Toggles or sets the autoPaused flag.
+ * When true, the TV won't automatically start the next round after payout.
+ */
+export async function setPaused(roomCode, paused) {
+  await firebaseRetry(() =>
+    update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
+      autoPaused: paused,
+      updatedAt: Date.now(),
+    })
+  );
+}
+
 export async function deleteRoom(roomCode) {
   await firebaseRetry(() => remove(ref(db, `${ROOM_PATH}/${roomCode}`)));
 }

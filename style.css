@@ -72,6 +72,17 @@ body {
 .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
 .back-btn { margin-top: 4px; }
 
+/* Pause button active state */
+#btn-tv-pause-auto.paused {
+  background: linear-gradient(180deg, #27ae60, #1e8449);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 3px 0 #145a32, 0 5px 10px rgba(0, 0, 0, 0.3);
+}
+#btn-tv-pause-auto.paused:hover {
+  filter: brightness(1.1);
+}
+
 .icon-btn {
   width: 40px; height: 40px;
   border-radius: 50%;
@@ -418,6 +429,27 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
 .tv-winning-tag .winning.red { background: linear-gradient(180deg, #c0392b, #5a0e0a); color: #fff; }
 .tv-winning-tag .winning.black { background: linear-gradient(180deg, #2c3e50, #0a0e13); color: #fff; }
 .tv-winning-tag .winning.green { background: linear-gradient(180deg, #27ae60, #0d3a1e); color: #fff; }
+
+/* Paused auto-start message */
+.tv-winning-tag .paused-msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 28px;
+  font-size: clamp(1rem, 2vw, 1.4rem);
+  font-weight: 700;
+  background: linear-gradient(180deg, #95a5a6, #34495e);
+  color: #fff;
+  border-radius: 24px;
+  border: 2px solid #ecf0f1;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: pulse-pause 2s ease-in-out infinite;
+}
+
+@keyframes pulse-pause {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
 
 /* "RIEN NE VA PLUS" — flash announcement between close-bets and spin. */
 .tv-rien {

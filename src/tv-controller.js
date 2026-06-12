@@ -11,7 +11,7 @@ import {
   createRoomAsTv, listenRoom, setupTvDisconnectHandler,
   openBets as fbOpenBets, closeBets as fbCloseBets,
   revealWinningNumber, applyPayouts, pushResult, applyBalanceUpdates,
-  deleteRoom as fbDeleteRoom, rejoinRoom,
+  deleteRoom as fbDeleteRoom, rejoinRoom, setPaused,
   MAX_PLAYERS,
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
@@ -123,6 +123,8 @@ function attachRoomListener() {
       if (meta.status === 'lobby') {
         renderLobbyUi();
       }
+      // Sync pause button UI when meta changes
+      syncPauseUi(meta.autoPaused || false);
     },
     onPlayersChange: (players) => {
       firebaseSnapshot.players = players;
@@ -219,6 +221,19 @@ function syncMuteUi() {
   });
 }
 
+function syncPauseUi(paused) {
+  const btn = document.getElementById('btn-tv-pause-auto');
+  if (btn) {
+    if (paused) {
+      btn.textContent = '▶ Resume Auto';
+      btn.classList.add('paused');
+    } else {
+      btn.textContent = '⏸ Pause Auto';
+      btn.classList.remove('paused');
+    }
+  }
+}
+
 /* ======= START ROUND (open bets) ======= */
 async function startRound() {
   const players = firebaseSnapshot.players || {};
@@ -236,6 +251,8 @@ async function startRound() {
 function setupGameUi() {
   renderPlayerStrip();
   renderTotalBets();
+  // Sync pause button UI
+  syncPauseUi(firebaseSnapshot.meta?.autoPaused || false);
   // Reset wheel + ball to idle state
   _wheel.angle   = 0;
   _wheel.angVel  = 0;
@@ -300,6 +317,17 @@ function wireTvGame() {
   if (muteBtn) {
     syncMuteUi();
     muteBtn.addEventListener('click', () => { toggleMute(); syncMuteUi(); });
+  }
+
+  const pauseBtn = document.getElementById('btn-tv-pause-auto');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', async () => {
+      const currentlyPaused = firebaseSnapshot.meta?.autoPaused || false;
+      const newPaused = !currentlyPaused;
+      await setPaused(roomCode, newPaused);
+      syncPauseUi(newPaused);
+      showToast(newPaused ? 'Auto-start paused' : 'Auto-start resumed', 2000);
+    });
   }
 }
 
@@ -491,12 +519,24 @@ async function onSpinSettled(winningNumber) {
     showToast(`🏆 ${player?.name || 'Player'} won ${top[1].netDelta} chips!`, 3000);
   }
 
-  // After 3s, auto-open the next round
+  // After 3s, auto-open the next round (unless paused)
   setTimeout(() => {
     if (firebaseSnapshot.meta?.status !== 'ended') {
       const banner = document.getElementById('tv-winning-tag');
       if (banner) banner.classList.remove('reveal');
-      startRound();
+      
+      // Check if auto-start is paused
+      const autoPaused = firebaseSnapshot.meta?.autoPaused || false;
+      if (!autoPaused) {
+        startRound();
+      } else {
+        // Show "Paused" indicator
+        const tag = document.getElementById('tv-winning-tag');
+        if (tag) {
+          tag.innerHTML = `<span class="paused-msg">⏸ Auto-Start Paused</span>`;
+          tag.classList.add('show');
+        }
+      }
     }
   }, 3500);
 }
