@@ -134,6 +134,7 @@
       <header class="phone-game-header">
         <span id="phone-header-status" class="phone-header-status">Waiting…</span>
         <span id="phone-round" class="phone-round">Round 0</span>
+        <button id="btn-phone-help" class="icon-btn help-btn" type="button" title="Help">❓</button>
       </header>
 
       <div id="phone-bet-board" class="phone-bet-board" aria-label="Betting felt"></div>
@@ -153,6 +154,68 @@
         <button id="btn-phone-game-mute" class="icon-btn" type="button" title="Mute">🔊</button>
       </div>
     </section>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="help-modal-overlay" hidden>
+      <div class="help-modal-box">
+        <button id="btn-help-close" class="help-close-btn" type="button">✕</button>
+        <h2 class="help-title">🎰 How to Play</h2>
+        
+        <div class="help-content">
+          <section class="help-section">
+            <h3>🎯 Bet Types</h3>
+            <div class="help-bet-list">
+              <div class="help-bet-item">
+                <span class="help-bet-name">Straight Up</span>
+                <span class="help-bet-desc">Single number (0-36)</span>
+                <span class="help-bet-payout">35:1</span>
+              </div>
+              <div class="help-bet-item">
+                <span class="help-bet-name">Red / Black</span>
+                <span class="help-bet-desc">Color of winning number</span>
+                <span class="help-bet-payout">1:1</span>
+              </div>
+              <div class="help-bet-item">
+                <span class="help-bet-name">Even / Odd</span>
+                <span class="help-bet-desc">Parity of winning number</span>
+                <span class="help-bet-payout">1:1</span>
+              </div>
+              <div class="help-bet-item">
+                <span class="help-bet-name">1-18 / 19-36</span>
+                <span class="help-bet-desc">Low or high range</span>
+                <span class="help-bet-payout">1:1</span>
+              </div>
+              <div class="help-bet-item">
+                <span class="help-bet-name">Dozens</span>
+                <span class="help-bet-desc">1st 12, 2nd 12, 3rd 12</span>
+                <span class="help-bet-payout">2:1</span>
+              </div>
+              <div class="help-bet-item">
+                <span class="help-bet-name">Columns</span>
+                <span class="help-bet-desc">Column 1, 2, or 3</span>
+                <span class="help-bet-payout">2:1</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="help-section">
+            <h3>📱 How to Bet</h3>
+            <ol class="help-instructions">
+              <li>Select a chip value (1, 5, 25, or 100)</li>
+              <li>Tap on the betting board to place your bet</li>
+              <li>Tap multiple times to add more chips to the same bet</li>
+              <li>Use "Clear" to remove all your bets</li>
+              <li>Wait for the wheel to spin and see if you win!</li>
+            </ol>
+          </section>
+
+          <section class="help-section">
+            <h3>💰 Payouts</h3>
+            <p class="help-note">When you win, you get your bet back plus the payout. For example, a 100 chip bet on Red that wins pays 100 (your bet) + 100 (1:1 payout) = 200 chips total.</p>
+          </section>
+        </div>
+      </div>
+    </div>
 
     <!-- Update toast -->
     <div id="update-toast" class="update-toast" hidden>

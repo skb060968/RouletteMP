@@ -915,6 +915,80 @@ function buildOffscreenWheel(size) {
 }
 
 /**
+ * Draw a raised outer rim on top of the wheel to create depth illusion.
+ * This rim stays stationary and makes the number pockets appear recessed.
+ */
+function drawRaisedRim(g, cx, cy, R) {
+  // Rim dimensions — matches the outer mahogany section of the wheel
+  const rimOuterR = R;              // Outer edge of the rim
+  const rimInnerR = R * 0.82;       // Inner edge where rim meets the gold ring
+  const rimWidth  = rimOuterR - rimInnerR;
+  
+  // ── 1. Main beveled rim face ────────────────────────────────────────────
+  // Create a radial gradient that simulates a beveled edge — darker at the
+  // inner edge (recessed), lighter/highlighted at the outer edge (raised)
+  const bevelGrad = g.createRadialGradient(cx, cy, rimInnerR, cx, cy, rimOuterR);
+  bevelGrad.addColorStop(0,    'rgba(42, 20, 8, 0.92)');   // Dark inner edge (shadow)
+  bevelGrad.addColorStop(0.15, 'rgba(94, 42, 20, 0.88)');  // Mid-dark mahogany
+  bevelGrad.addColorStop(0.35, 'rgba(132, 58, 32, 0.85)'); // Rich mahogany
+  bevelGrad.addColorStop(0.65, 'rgba(118, 48, 26, 0.88)'); // Slightly darker
+  bevelGrad.addColorStop(0.85, 'rgba(94, 38, 18, 0.90)');  // Outer shadow
+  bevelGrad.addColorStop(1,    'rgba(58, 24, 10, 0.92)');  // Darkest edge
+  
+  g.save();
+  g.beginPath();
+  g.arc(cx, cy, rimOuterR, 0, Math.PI * 2);
+  g.arc(cx, cy, rimInnerR, 0, Math.PI * 2, true);
+  g.closePath();
+  g.fillStyle = bevelGrad;
+  g.fill();
+  g.restore();
+  
+  // ── 2. Inner shadow ring ─────────────────────────────────────────────────
+  // Thick dark shadow on the inner edge to create strong recession illusion
+  const shadowGrad = g.createRadialGradient(cx, cy, rimInnerR - rimWidth * 0.2, cx, cy, rimInnerR + rimWidth * 0.15);
+  shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  shadowGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.7)');
+  shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  
+  g.save();
+  g.beginPath();
+  g.arc(cx, cy, rimInnerR + rimWidth * 0.15, 0, Math.PI * 2);
+  g.arc(cx, cy, rimInnerR - rimWidth * 0.2, 0, Math.PI * 2, true);
+  g.closePath();
+  g.fillStyle = shadowGrad;
+  g.fill();
+  g.restore();
+  
+  // ── 3. Highlight on outer top edge ───────────────────────────────────────
+  // Subtle highlight on the very outer edge to suggest it's raised and catching light
+  const highlightGrad = g.createRadialGradient(cx - R*0.15, cy - R*0.18, R*0.05, cx, cy, rimOuterR);
+  highlightGrad.addColorStop(0,    'rgba(200, 150, 80, 0.25)');
+  highlightGrad.addColorStop(0.5,  'rgba(160, 100, 50, 0.15)');
+  highlightGrad.addColorStop(0.85, 'rgba(0, 0, 0, 0)');
+  highlightGrad.addColorStop(1,    'rgba(0, 0, 0, 0)');
+  
+  g.save();
+  g.beginPath();
+  g.arc(cx, cy, rimOuterR, 0, Math.PI * 2);
+  g.arc(cx, cy, rimOuterR - rimWidth * 0.35, 0, Math.PI * 2, true);
+  g.closePath();
+  g.fillStyle = highlightGrad;
+  g.fill();
+  g.restore();
+  
+  // ── 4. Beveled edge detail ───────────────────────────────────────────────
+  // Sharp inner edge line to emphasize the step down into the wheel
+  g.save();
+  g.beginPath();
+  g.arc(cx, cy, rimInnerR, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+  g.lineWidth = R * 0.004;
+  g.stroke();
+  g.restore();
+}
+
+/**
  * Draw one frame of the wheel onto the live canvas.
  * Applies the current wheel rotation angle, then draws the ball on top.
  */
@@ -957,6 +1031,12 @@ function drawWheelFrame() {
   g.translate(-cx, -cy);
   g.drawImage(face, 0, 0);
   g.restore();
+
+  // ── Raised outer rim — creates depth illusion ───────────────────────────
+  // This rim sits on top of the wheel face, making the number pockets appear
+  // recessed inside a raised mahogany bowl. The rim should NOT rotate with the
+  // wheel, so it's drawn after we restore the rotation transform.
+  drawRaisedRim(g, cx, cy, R);
 
   // Ball — spirals inward continuously as it decelerates (physics-based path)
   if (_ball.visible) {

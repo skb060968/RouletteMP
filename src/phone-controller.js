@@ -313,6 +313,14 @@ function wirePhoneGame() {
   screen.dataset._wired = '1';
   buildBetBoard();
 
+  // Wire help button
+  const helpBtn = document.getElementById('btn-phone-help');
+  if (helpBtn) {
+    helpBtn.addEventListener('click', () => {
+      showHelpModal();
+    });
+  }
+
   const muteBtn = document.getElementById('btn-phone-game-mute');
   if (muteBtn) {
     muteBtn.textContent = isMuted() ? '🔇' : '🔊';
@@ -781,6 +789,33 @@ function startCountdownDisplay() {
     }
     renderHeader();
   }, 250);
+}
+
+/* ======= HELP MODAL ======= */
+function showHelpModal() {
+  const modal = document.getElementById('help-modal');
+  if (!modal) return;
+  
+  modal.hidden = false;
+  
+  // Wire close button (only once)
+  const closeBtn = document.getElementById('btn-help-close');
+  if (closeBtn && !closeBtn.dataset._wired) {
+    closeBtn.dataset._wired = '1';
+    closeBtn.addEventListener('click', () => {
+      modal.hidden = true;
+    });
+  }
+  
+  // Close on overlay click
+  if (!modal.dataset._wired) {
+    modal.dataset._wired = '1';
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.hidden = true;
+      }
+    });
+  }
 }
 
 /* ======= CLEANUP ======= */
