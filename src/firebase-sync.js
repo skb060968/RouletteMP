@@ -272,6 +272,40 @@ export async function setPaused(roomCode, paused) {
   );
 }
 
+/**
+ * Removes all disconnected players from the room.
+ * Cleans up ghost players and players who have lost connection.
+ */
+export async function removeDisconnectedPlayers(roomCode) {
+  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
+  const snap = await firebaseRetry(() => get(roomRef));
+  if (!snap.exists()) return { removed: 0 };
+  
+  const data = snap.val();
+  const players = data.players || {};
+  
+  // Find all players that are disconnected or ghost (no name)
+  const toRemove = Object.keys(players).filter((k) => {
+    const p = players[k];
+    return !p || !p.name || p.connected === false;
+  });
+  
+  if (toRemove.length === 0) return { removed: 0 };
+  
+  // Build cleanup update
+  const cleanup = {};
+  toRemove.forEach((k) => {
+    cleanup[`players/${k}`] = null;
+    // Also clean up their bets if any
+    cleanup[`bets/${k}`] = null;
+  });
+  cleanup['meta/updatedAt'] = Date.now();
+  
+  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), cleanup));
+  
+  return { removed: toRemove.length, players: toRemove };
+}
+
 export async function deleteRoom(roomCode) {
   await firebaseRetry(() => remove(ref(db, `${ROOM_PATH}/${roomCode}`)));
 }

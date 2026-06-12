@@ -11,7 +11,7 @@ import {
   createRoomAsTv, listenRoom, setupTvDisconnectHandler,
   openBets as fbOpenBets, closeBets as fbCloseBets,
   revealWinningNumber, applyPayouts, pushResult, applyBalanceUpdates,
-  deleteRoom as fbDeleteRoom, rejoinRoom, setPaused,
+  deleteRoom as fbDeleteRoom, rejoinRoom, setPaused, removeDisconnectedPlayers,
   MAX_PLAYERS,
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
@@ -327,6 +327,39 @@ function wireTvGame() {
       await setPaused(roomCode, newPaused);
       syncPauseUi(newPaused);
       showToast(newPaused ? 'Auto-start paused' : 'Auto-start resumed', 2000);
+    });
+  }
+
+  const removeDisconnectedBtn = document.getElementById('btn-tv-remove-disconnected');
+  if (removeDisconnectedBtn) {
+    removeDisconnectedBtn.addEventListener('click', async () => {
+      const players = firebaseSnapshot.players || {};
+      const disconnected = Object.keys(players).filter((k) => {
+        const p = players[k];
+        return !p || !p.name || p.connected === false;
+      });
+      
+      if (disconnected.length === 0) {
+        showToast('No disconnected players');
+        return;
+      }
+      
+      const playerNames = disconnected.map((k) => {
+        const p = players[k];
+        return p?.name || 'Unknown';
+      }).join(', ');
+      
+      const ok = await confirmModal(
+        'Remove disconnected players?',
+        `Remove ${disconnected.length} player${disconnected.length === 1 ? '' : 's'}: ${playerNames}`,
+        'Remove',
+        'Cancel'
+      );
+      
+      if (!ok) return;
+      
+      const result = await removeDisconnectedPlayers(roomCode);
+      showToast(`Removed ${result.removed} player${result.removed === 1 ? '' : 's'}`, 2000);
     });
   }
 }
