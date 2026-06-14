@@ -10,6 +10,7 @@ import './firebase-config.js';
 import { showScreen } from './platform-ui.js';
 import { startTvFlow, resumeTvSession } from './tv-controller.js';
 import { startPhoneFlow, resumePhoneSession } from './phone-controller.js';
+import { initDeepLinkHandler } from './deep-link-handler.js';
 
 const SESSION_KEY = 'roulette_mp_session';
 
@@ -34,7 +35,19 @@ async function init() {
     startPhoneFlow(code);
   });
 
-  // Auto-route via ?code=&action=join
+  // Check for deep link with room code (?room=ABCD)
+  const roomCode = initDeepLinkHandler({
+    roomInputId: 'phone-join-code',
+    joinScreenId: 'phone-join',
+    gameName: 'Roulette MP'
+  });
+  
+  if (roomCode) {
+    startPhoneFlow(roomCode);
+    return;
+  }
+
+  // Auto-route via ?code=&action=join (legacy support)
   const queryCode = getQueryParam('code');
   const action = getQueryParam('action');
   if (queryCode && action === 'join') {

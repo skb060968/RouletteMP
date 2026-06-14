@@ -18,6 +18,7 @@ import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
+import { createShareHandler } from './deep-link-handler.js';
 
 const SESSION_KEY = 'roulette_mp_session';
 
@@ -198,6 +199,11 @@ function wireTvLobby() {
 
   const startBtn = document.getElementById('btn-tv-start-round');
   if (startBtn) startBtn.addEventListener('click', startRound);
+
+  const shareBtn = document.getElementById('btn-tv-share-code');
+  if (shareBtn) {
+    shareBtn.addEventListener('click', createShareHandler(roomCode, 'Roulette MP'));
+  }
 
   const closeBtn = document.getElementById('btn-tv-lobby-close');
   if (closeBtn) closeBtn.addEventListener('click', async () => {
