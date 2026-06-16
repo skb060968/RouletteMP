@@ -5,9 +5,10 @@
  * - URL parameters for room codes
  * - Smart app banner (Open/Install PWA)
  * - Share functionality with deep links
+ * - QR code generation for easy room sharing
  * 
  * Usage:
- *   import { initDeepLinkHandler, createShareHandler } from './deep-link-handler.js';
+ *   import { initDeepLinkHandler, createShareHandler, showQRCode } from './deep-link-handler.js';
  *   
  *   // In your init function:
  *   const roomCode = initDeepLinkHandler({
@@ -18,9 +19,13 @@
  *   
  *   // For share button:
  *   shareButton.addEventListener('click', createShareHandler(roomCode, 'Roulette MP'));
+ *   
+ *   // For QR code button:
+ *   qrButton.addEventListener('click', () => showQRCode(roomCode, 'Roulette MP'));
  */
 
 import { showToast } from './platform-ui.js';
+import QRCode from 'qrcode';
 
 let deferredInstallPrompt = null;
 
@@ -219,4 +224,109 @@ async function handleOpenApp(gameName, isMobile) {
     console.warn('Failed to open app:', err);
     showToast('Install app: Browser menu (⋮) → "Install app"', 3500);
   }
+}
+
+/**
+ * Show QR code modal for room sharing
+ * @param {string} roomCode - The room code to share
+ * @param {string} gameName - Name of the game
+ */
+export async function showQRCode(roomCode, gameName) {
+  if (!roomCode) return;
+  
+  // Build share URL with room code
+  const shareUrl = `${location.origin}${location.pathname}?room=${roomCode}`;
+  
+  // Remove existing QR modal if any
+  const existing = document.getElementById('qr-modal');
+  if (existing) existing.remove();
+  
+  // Create modal
+  const modal = document.createElement('div');
+  modal.id = 'qr-modal';
+  modal.className = 'qr-modal';
+  modal.innerHTML = `
+    <div class="qr-modal-overlay"></div>
+    <div class="qr-modal-content">
+      <button class="qr-modal-close" aria-label="Close">×</button>
+      <h2 class="qr-modal-title">Scan to Join</h2>
+      <p class="qr-modal-game">${gameName}</p>
+      <div class="qr-modal-code-display">
+        <span class="qr-code-label">Room Code:</span>
+        <span class="qr-code-value">${roomCode}</span>
+      </div>
+      <div class="qr-canvas-container">
+        <canvas id="qr-canvas"></canvas>
+      </div>
+      <p class="qr-modal-hint">Scan with camera to join instantly</p>
+      <div class="qr-modal-actions">
+        <button class="qr-modal-btn qr-share-btn">📱 Share Link</button>
+        <button class="qr-modal-btn qr-download-btn">💾 Save QR</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Generate QR code
+  try {
+    const canvas = document.getElementById('qr-canvas');
+    await QRCode.toCanvas(canvas, shareUrl, {
+      width: 280,
+      margin: 2,
+      color: {
+        dark: '#1a1a1a',
+        light: '#ffffff'
+      }
+    });
+  } catch (err) {
+    console.error('Failed to generate QR code:', err);
+    showToast('Failed to generate QR code');
+    modal.remove();
+    return;
+  }
+  
+  // Show modal with animation
+  setTimeout(() => modal.classList.add('show'), 50);
+  
+  // Close handlers
+  const closeModal = () => {
+    modal.classList.remove('show');
+    setTimeout(() => modal.remove(), 300);
+  };
+  
+  modal.querySelector('.qr-modal-close')?.addEventListener('click', closeModal);
+  modal.querySelector('.qr-modal-overlay')?.addEventListener('click', closeModal);
+  
+  // Share button
+  modal.querySelector('.qr-share-btn')?.addEventListener('click', async () => {
+    const shareHandler = createShareHandler(roomCode, gameName);
+    await shareHandler();
+  });
+  
+  // Download button
+  modal.querySelector('.qr-download-btn')?.addEventListener('click', () => {
+    const canvas = document.getElementById('qr-canvas');
+    if (!canvas) return;
+    
+    try {
+      const link = document.createElement('a');
+      link.download = `${gameName.replace(/\s+/g, '-')}-Room-${roomCode}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      showToast('QR code saved!');
+    } catch (err) {
+      console.error('Failed to download QR code:', err);
+      showToast('Failed to save QR code');
+    }
+  });
+  
+  // Close on Escape key
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      document.removeEventListener('keydown', handleEscape);
+    }
+  };
+  document.addEventListener('keydown', handleEscape);
 }

@@ -9,11 +9,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "firebase": "^12.9.0"
+    "firebase": "^12.9.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "vite": "^7.3.1"
   },
-  "keywords": ["roulette", "casino", "party", "tv", "multiplayer", "firebase", "pwa"],
+  "keywords": [
+    "roulette",
+    "casino",
+    "party",
+    "tv",
+    "multiplayer",
+    "firebase",
+    "pwa"
+  ],
   "license": "MIT"
 }
