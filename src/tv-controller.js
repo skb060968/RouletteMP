@@ -12,6 +12,7 @@ import {
   openBets as fbOpenBets, closeBets as fbCloseBets,
   revealWinningNumber, applyPayouts, pushResult, applyBalanceUpdates,
   deleteRoom as fbDeleteRoom, rejoinRoom, setPaused, removeDisconnectedPlayers,
+  removePlayer,
   MAX_PLAYERS,
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
@@ -157,6 +158,32 @@ function attachRoomListener() {
 function setupLobbyUi() {
   const codeEl = document.getElementById('tv-lobby-code');
   if (codeEl) codeEl.textContent = roomCode;
+  
+  // Set up delegated event listener for remove buttons (only once)
+  const playerList = document.getElementById('tv-lobby-players');
+  if (playerList && !playerList.dataset.removeListenerAdded) {
+    playerList.dataset.removeListenerAdded = 'true';
+    playerList.addEventListener('click', async (e) => {
+      const removeBtn = e.target.closest('.remove-player-btn');
+      if (!removeBtn || removeBtn.disabled) return;
+      
+      const targetIndex = parseInt(removeBtn.dataset.playerIndex, 10);
+      const playerName = removeBtn.dataset.playerName;
+      
+      if (isNaN(targetIndex) || !roomCode) return;
+      
+      removeBtn.disabled = true;
+      try {
+        await removePlayer(roomCode, targetIndex);
+        showToast(`${playerName} removed from room`);
+      } catch (err) {
+        console.error('Failed to remove player:', err);
+        showToast('Failed to remove player');
+        removeBtn.disabled = false;
+      }
+    });
+  }
+  
   renderLobbyUi();
 }
 
@@ -179,7 +206,34 @@ function renderLobbyUi() {
       const p = players[k] || {};
       const li = document.createElement('li');
       li.className = 'tv-lobby-player';
-      li.innerHTML = `<span class="emoji">${escapeHtml(p.emoji || '😀')}</span><span class="name">${escapeHtml(p.name || 'Player')}</span><span class="chips">💰 ${p.chips ?? 0}</span>`;
+      
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'emoji';
+      emojiSpan.textContent = p.emoji || '😀';
+      
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'name';
+      nameSpan.textContent = p.name || 'Player';
+      
+      const chipsSpan = document.createElement('span');
+      chipsSpan.className = 'chips';
+      chipsSpan.textContent = `💰 ${p.chips ?? 0}`;
+      
+      li.appendChild(emojiSpan);
+      li.appendChild(nameSpan);
+      li.appendChild(chipsSpan);
+      
+      // Add remove button for TV host
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-player-btn';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Remove player';
+      // Store player info in data attributes for event delegation
+      const playerIndex = parseInt(k.replace('player_', ''), 10);
+      removeBtn.dataset.playerIndex = playerIndex;
+      removeBtn.dataset.playerName = p.name;
+      li.appendChild(removeBtn);
+      
       if (!p.connected) li.classList.add('disconnected');
       list.appendChild(li);
     });

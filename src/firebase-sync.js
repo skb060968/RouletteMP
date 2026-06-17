@@ -345,6 +345,16 @@ export async function leaveRoom(roomCode, playerIndex) {
   );
 }
 
+/**
+ * Host removes a player from the lobby (kick).
+ * Similar to leaveRoom but can be called by the host on any player.
+ */
+export async function removePlayer(roomCode, playerIndex) {
+  await firebaseRetry(() =>
+    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
+  );
+}
+
 /* ======= DISCONNECT HOOKS ======= */
 export function setupTvDisconnectHandler(roomCode) {
   const r = ref(db, `${ROOM_PATH}/${roomCode}/meta/host/connected`);
