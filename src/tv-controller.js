@@ -17,7 +17,7 @@ import {
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
-import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
+import { initAudio, playSound, isMuted, toggleMute, startBackgroundMusic, stopBackgroundMusic } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
 import { createShareHandler, showQRCode } from './deep-link-handler.js';
 
@@ -65,6 +65,7 @@ export async function startTvFlow() {
   document.body.dataset.mode = 'tv';
   initAudio();
   buildWheel();
+  startBackgroundMusic(0.25); // Start background music at 25% volume
   showScreen('tv-create');
   wireTvCreate();
   wireTvLobby();
@@ -75,6 +76,7 @@ export async function resumeTvSession(savedRoomCode) {
   document.body.dataset.mode = 'tv';
   initAudio();
   buildWheel();
+  startBackgroundMusic(0.25); // Start background music at 25% volume
   roomCode = savedRoomCode;
   const result = await rejoinRoom(savedRoomCode, null, 'tv');
   if (!result.success) { clearSession(); showScreen('home'); return; }
@@ -1142,6 +1144,7 @@ function cleanupAndGoHome() {
   stopCountdown();
   if (_spinAnimationTimer) { clearTimeout(_spinAnimationTimer); _spinAnimationTimer = null; }
   stopWheelRenderLoop();
+  stopBackgroundMusic(); // Stop background music when leaving TV mode
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   clearSession();
   roomCode = null;

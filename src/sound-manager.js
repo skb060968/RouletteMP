@@ -17,6 +17,7 @@ const SOUND_FILES = {
   spin: '/sounds/spin-loop.mp3',
   win: '/sounds/win.mp3',
   error: '/sounds/error.mp3',
+  music: '/sounds/music.mp3',
 };
 
 const MUTE_KEY = 'roulette_mp_muted';
@@ -160,4 +161,110 @@ export function playSound(name, volume = 1.0) {
     a.volume = volume;
     a.play().catch(() => {});
   } catch (_) {}
+}
+
+/* ======= BACKGROUND MUSIC ======= */
+
+let bgMusicAudio = null;
+let bgMusicSourceNode = null;
+let bgMusicGainNode = null;
+let bgMusicStartTime = 0;
+let bgMusicPausedAt = 0;
+
+/**
+ * Starts looping background music at specified volume (0.0 - 1.0).
+ * Uses HTML Audio element for reliable looping across all platforms.
+ */
+export function startBackgroundMusic(volume = 0.3) {
+  if (isMuted()) return;
+  
+  // Stop any existing music first
+  stopBackgroundMusic();
+  
+  const url = SOUND_FILES.music;
+  if (!url) return;
+  
+  try {
+    bgMusicAudio = new Audio(url);
+    bgMusicAudio.loop = true;
+    bgMusicAudio.volume = volume;
+    bgMusicAudio.preload = 'auto';
+    
+    const playPromise = bgMusicAudio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        // If autoplay is blocked, music will start on next user interaction
+        console.log('Background music autoplay blocked - will start on next interaction');
+      });
+    }
+  } catch (err) {
+    console.error('Failed to start background music:', err);
+  }
+}
+
+/**
+ * Stops the background music.
+ */
+export function stopBackgroundMusic() {
+  if (bgMusicAudio) {
+    try {
+      bgMusicAudio.pause();
+      bgMusicAudio.currentTime = 0;
+      bgMusicAudio = null;
+    } catch (_) {}
+  }
+  if (bgMusicSourceNode) {
+    try {
+      bgMusicSourceNode.stop();
+      bgMusicSourceNode.disconnect();
+      bgMusicSourceNode = null;
+    } catch (_) {}
+  }
+  if (bgMusicGainNode) {
+    try {
+      bgMusicGainNode.disconnect();
+      bgMusicGainNode = null;
+    } catch (_) {}
+  }
+}
+
+/**
+ * Sets background music volume (0.0 - 1.0).
+ */
+export function setBackgroundMusicVolume(volume) {
+  if (bgMusicAudio) {
+    try {
+      bgMusicAudio.volume = Math.max(0, Math.min(1, volume));
+    } catch (_) {}
+  }
+  if (bgMusicGainNode) {
+    try {
+      bgMusicGainNode.gain.value = Math.max(0, Math.min(1, volume));
+    } catch (_) {}
+  }
+}
+
+/**
+ * Pauses background music (can be resumed).
+ */
+export function pauseBackgroundMusic() {
+  if (bgMusicAudio) {
+    try {
+      bgMusicAudio.pause();
+    } catch (_) {}
+  }
+}
+
+/**
+ * Resumes paused background music.
+ */
+export function resumeBackgroundMusic() {
+  if (bgMusicAudio && bgMusicAudio.paused && !isMuted()) {
+    try {
+      const playPromise = bgMusicAudio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    } catch (_) {}
+  }
 }
