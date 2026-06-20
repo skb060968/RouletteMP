@@ -65,7 +65,6 @@ export async function startTvFlow() {
   document.body.dataset.mode = 'tv';
   initAudio();
   buildWheel();
-  startBackgroundMusic(0.25); // Start background music at 25% volume
   showScreen('tv-create');
   wireTvCreate();
   wireTvLobby();
@@ -76,7 +75,6 @@ export async function resumeTvSession(savedRoomCode) {
   document.body.dataset.mode = 'tv';
   initAudio();
   buildWheel();
-  startBackgroundMusic(0.25); // Start background music at 25% volume
   roomCode = savedRoomCode;
   const result = await rejoinRoom(savedRoomCode, null, 'tv');
   if (!result.success) { clearSession(); showScreen('home'); return; }
@@ -88,6 +86,7 @@ export async function resumeTvSession(savedRoomCode) {
   } else {
     showScreen('tv-game');
     setupGameUi();
+    startBackgroundMusic(0.25); // Start music when resuming into game screen
   }
   wireTvCreate();
   wireTvLobby();
@@ -158,6 +157,7 @@ function attachRoomListener() {
 
 /* ======= LOBBY ======= */
 function setupLobbyUi() {
+  stopBackgroundMusic(); // Stop music when returning to lobby
   const codeEl = document.getElementById('tv-lobby-code');
   if (codeEl) codeEl.textContent = roomCode;
   
@@ -313,6 +313,7 @@ async function startRound() {
   }
   showScreen('tv-game');
   setupGameUi();
+  startBackgroundMusic(0.25); // Start background music when wheel screen is shown
   await fbOpenBets(roomCode, 30);
   startCountdown(30);
 }
