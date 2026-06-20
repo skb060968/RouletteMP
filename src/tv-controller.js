@@ -17,7 +17,7 @@ import {
 } from './firebase-sync.js';
 import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
-import { initAudio, playSound, isMuted, toggleMute, startBackgroundMusic, stopBackgroundMusic } from './sound-manager.js';
+import { initAudio, playSound, isMuted, toggleMute, startBackgroundMusic, stopBackgroundMusic, setBackgroundMusicVolume } from './sound-manager.js';
 import { showScreen, showToast, confirmModal } from './platform-ui.js';
 import { createShareHandler, showQRCode } from './deep-link-handler.js';
 
@@ -86,7 +86,7 @@ export async function resumeTvSession(savedRoomCode) {
   } else {
     showScreen('tv-game');
     setupGameUi();
-    startBackgroundMusic(0.25); // Start music when resuming into game screen
+    startBackgroundMusic(0.4); // Start at 40% volume when resuming into game screen
   }
   wireTvCreate();
   wireTvLobby();
@@ -313,7 +313,7 @@ async function startRound() {
   }
   showScreen('tv-game');
   setupGameUi();
-  startBackgroundMusic(0.25); // Start background music when wheel screen is shown
+  startBackgroundMusic(0.4); // Start at 40% volume during betting
   await fbOpenBets(roomCode, 30);
   startCountdown(30);
 }
@@ -491,6 +491,7 @@ async function triggerSpin() {
       tag.innerHTML = `<span class="spinning">SPINNING…</span>`;
       tag.classList.add('show');
     }
+    setBackgroundMusicVolume(0.25); // Reduce music volume to 25% during spin
     playSound('spin', 1.0);
     startPhysicsSpin(winningNumber);
   }, 1000);
@@ -581,6 +582,9 @@ async function onSpinSettled(winningNumber) {
   // 500ms theatrical pause — the silence after the ball lands lets the
   // reveal land harder than an instant cut.
   await new Promise((r) => setTimeout(r, 500));
+
+  // Restore music volume to 40% after spin completes
+  setBackgroundMusicVolume(0.4);
 
   // Reveal + payout
   await revealWinningNumber(roomCode, winningNumber);
