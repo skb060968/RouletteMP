@@ -491,7 +491,7 @@ async function triggerSpin() {
       tag.innerHTML = `<span class="spinning">SPINNING…</span>`;
       tag.classList.add('show');
     }
-    setBackgroundMusicVolume(0.25); // Reduce music volume to 25% during spin
+    setBackgroundMusicVolume(0.15); // Reduce music volume to 15% during spin
     playSound('spin', 1.0);
     startPhysicsSpin(winningNumber);
   }, 1000);
