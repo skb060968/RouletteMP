@@ -69,35 +69,69 @@ async function init() {
 }
 
 /* ======= SERVICE WORKER ======= */
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const reg = await navigator.serviceWorker.register('/sw.js');
-      if (reg.waiting) showUpdateToast(reg);
-      reg.addEventListener('updatefound', () => {
-        const installing = reg.installing;
-        if (installing) {
-          installing.addEventListener('statechange', () => {
-            if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-              showUpdateToast(reg);
-            }
-          });
-        }
-      });
-    } catch (err) {
-      console.warn('SW register failed:', err.message);
-    }
-  });
+// Update notification functions
+window.reloadForUpdate = function() {
+  window.location.reload();
+};
+
+window.dismissUpdate = function() {
+  document.getElementById('updateToast').style.display = 'none';
+};
+
+function showUpdateToast() {
+  const toast = document.getElementById('updateToast');
+  if (!toast) return;
+  toast.style.display = 'block';
+  toast.style.animation = 'slideUp 0.4s ease-out';
 }
 
-function showUpdateToast(reg) {
-  const toast = document.getElementById('update-toast');
-  const btn = document.getElementById('update-refresh-btn');
-  if (!toast || !btn) return;
-  toast.hidden = false;
-  btn.addEventListener('click', () => {
-    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-    location.reload();
+// Register Service Worker for PWA with update detection
+if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  
+  // Detect controller change and reload
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    console.log('[App] Controller changed, reloading...');
+  });
+  
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('✅ Service Worker registered:', registration);
+        
+        // Check for updates periodically (every 5 minutes)
+        setInterval(() => {
+          registration.update();
+        }, 5 * 60 * 1000);
+        
+        // Listen for waiting service worker
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          console.log('[App] New service worker found');
+          
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[App] New service worker installed, update available');
+              showUpdateToast();
+            }
+          });
+        });
+      })
+      .catch((error) => {
+        console.log('❌ Service Worker registration failed:', error);
+      });
+    
+    // Listen for messages from service worker
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'UPDATE_AVAILABLE') {
+        console.log(`[App] Update available: ${event.data.version}`);
+        showUpdateToast();
+      }
+    });
+  });
+}
   }, { once: true });
 }
 

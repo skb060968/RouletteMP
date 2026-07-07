@@ -1,6 +1,7 @@
 /* Roulette MP PWA Service Worker */
 
-const CACHE_NAME = "roulette-mp-v55";
+const CACHE_VERSION = 'v56'; // Upgraded update notification system
+const CACHE_NAME = `roulette-mp-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
   "/",
@@ -16,18 +17,41 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  console.log(`[SW] Installing version ${CACHE_VERSION}`);
+  // Skip waiting to activate new service worker immediately
+  self.skipWaiting();
+  
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)),
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('[SW] Caching app shell');
+      return cache.addAll(STATIC_ASSETS);
+    })
   );
 });
 
 self.addEventListener("activate", (event) => {
+  console.log(`[SW] Activating version ${CACHE_VERSION}`);
+  
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.map((key) => {
-        if (key !== CACHE_NAME) return caches.delete(key);
+        if (key !== CACHE_NAME) {
+          console.log(`[SW] Deleting old cache: ${key}`);
+          return caches.delete(key);
+        }
       })),
-    ).then(() => self.clients.claim()),
+    ).then(() => self.clients.claim())
+    .then(() => {
+      // Notify all clients about the update
+      return self.clients.matchAll().then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({
+            type: 'UPDATE_AVAILABLE',
+            version: CACHE_VERSION
+          });
+        });
+      });
+    })
   );
 });
 
