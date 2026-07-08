@@ -132,7 +132,5 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
-  }, { once: true });
-}
 
 init();
