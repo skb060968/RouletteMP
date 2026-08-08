@@ -15,7 +15,8 @@ import {
 import { BET_TYPES, betKey, payoutMultiplier, resolveBets } from './bet-validator.js';
 import { colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
-import { showScreen, showToast } from './platform-ui.js';
+import { showScreen, showToast, dismissConfirmModals } from './platform-ui.js';
+import { ROOM_CODE_PATTERN } from './deep-link-handler.js';
 
 const SESSION_KEY = 'roulette_mp_session';
 const CHIP_DENOMINATIONS = [1, 5, 25, 100];
@@ -23,8 +24,15 @@ const CHIP_DENOMINATIONS = [1, 5, 25, 100];
 let roomCode = null;
 let playerIndex = null;
 let unsubscribe = null;
+let cancelPlayerDisconnect = null;
 let firebaseSnapshot = {};
+let previousPlayers = {};
 let selectedDenom = 25;
+let activeBetAuthority = null;
+let lastPhaseKey = null;
+let lastRoundKey = null;
+let shownPayoutKey = null;
+let _joinInFlight = false;
 /** Local pending bets — keyed by betKey, value is the chip count. Mirrors
  *  what's written to Firebase but allows instant UI feedback before round-trip. */
 let localBets = {};
@@ -36,6 +44,11 @@ let lastRoundBets = {};
 let lastRoundBetObjects = [];
 /** Debounced bet-write timers keyed by betKey. */
 const _betWriteTimers = new Map();
+/** Firebase bet mutations are serialized so an older absolute write cannot win last. */
+let _betWriteChain = Promise.resolve();
+let _betWriteGeneration = 0;
+const _pendingBetWrites = new Map();
+let _clearWritePending = 0;
 
 /* ======= SESSION ======= */
 function saveSession() {
@@ -72,7 +85,7 @@ export async function resumePhoneSession(savedRoomCode, savedPlayerIndex) {
   playerIndex = savedPlayerIndex;
   const result = await rejoinRoom(savedRoomCode, savedPlayerIndex, 'phone');
   if (!result.success) { clearSession(); showScreen('home'); return; }
-  setupPlayerDisconnectHandler(roomCode, playerIndex);
+  cancelPlayerDisconnect = setupPlayerDisconnectHandler(roomCode, playerIndex);
   attachRoomListener();
   if (result.status === 'lobby') showScreen('phone-lobby');
   else showScreen('phone-game');
@@ -98,25 +111,33 @@ function wirePhoneJoin() {
   const submit = document.getElementById('btn-phone-join-submit');
   const back = document.getElementById('btn-phone-join-back');
   if (submit) submit.addEventListener('click', async () => {
+    if (_joinInFlight) return;
     const code = (document.getElementById('phone-join-code')?.value || '').trim().toUpperCase();
     const name = (document.getElementById('phone-join-name')?.value || '').trim();
-    if (!code || code.length !== 4) { showToast('Enter a 4-letter room code'); return; }
+    if (!ROOM_CODE_PATTERN.test(code)) { showToast('Enter a valid 4-letter room code'); return; }
     if (!name) { showToast('Enter your name'); return; }
     const sel = document.querySelector('.phone-emoji-picker .emoji-btn.selected');
-    const emoji = sel?.dataset.emoji || '😀';
+    const emoji = sel?.dataset.emoji || '🤵';
+    _joinInFlight = true;
+    submit.disabled = true;
+    if (back) back.disabled = true;
     try {
       const result = await joinRoomAsPlayer(code, name, emoji);
       if (!result.success) { showToast(result.reason || 'Failed to join'); return; }
       roomCode = code;
       playerIndex = result.playerIndex;
       saveSession();
-      setupPlayerDisconnectHandler(roomCode, playerIndex);
+      cancelPlayerDisconnect = setupPlayerDisconnectHandler(roomCode, playerIndex);
       attachRoomListener();
       showScreen('phone-lobby');
       renderPhoneLobby();
     } catch (err) {
       console.error(err);
       showToast('Failed to join.');
+    } finally {
+      _joinInFlight = false;
+      submit.disabled = false;
+      if (back) back.disabled = false;
     }
   });
   if (back) back.addEventListener('click', () => {
@@ -129,32 +150,42 @@ function wirePhoneJoin() {
 function attachRoomListener() {
   if (unsubscribe) unsubscribe();
   unsubscribe = listenRoom(roomCode, {
+    onRoomChange: (room) => {
+      firebaseSnapshot = room;
+    },
     onMetaChange: (meta) => {
       firebaseSnapshot.meta = meta;
-      const status = meta.status;
+      const game = firebaseSnapshot.game || {};
+      const status = game.phase || meta.status;
+      const phaseKey = `${status}:${game.roundNumber ?? -1}:${game.revision ?? -1}`;
+      if (status !== 'betting') {
+        cancelPendingBetWrites();
+        activeBetAuthority = null;
+      }
+      if (phaseKey === lastPhaseKey) return;
+      lastPhaseKey = phaseKey;
+
       if (status === 'lobby') {
-        // Round just reset — clear local bet state
         localBets = {};
         lastRoundBets = {};
         lastRoundBetObjects = [];
         showScreen('phone-lobby');
         renderPhoneLobby();
       } else if (status === 'betting') {
-        // New round opened — clear all bet state so players start fresh
+        activeBetAuthority = { roundNumber: game.roundNumber, revision: game.revision };
         localBets = {};
         lastRoundBets = {};
         lastRoundBetObjects = [];
+        lastRoundKey = null;
         showScreen('phone-game');
         renderBetBoard();
         renderResultPanel();
         renderHeader();
         startCountdownDisplay();
       } else if (status === 'spinning') {
-        // Snapshot bets the moment betting closes — Firebase may clear them
-        // before the result phase finishes rendering.
         snapshotLastRoundBets();
         renderHeader();
-        renderBetBoard(); // disabled overlay
+        renderBetBoard();
         renderResultPanel();
       } else if (status === 'payout') {
         renderHeader();
@@ -166,10 +197,11 @@ function attachRoomListener() {
       }
     },
     onPlayersChange: (players) => {
-      const oldPlayers = firebaseSnapshot.players;
+      const oldPlayers = previousPlayers;
+      previousPlayers = players;
       firebaseSnapshot.players = players;
       const myKey = `player_${playerIndex}`;
-      if (players && Object.keys(players).length > 0 && !players[myKey]) {
+      if (!players?.[myKey]) {
         showToast('Removed from room.');
         cleanupAndGoHome();
         return;
@@ -177,7 +209,7 @@ function attachRoomListener() {
       
       // Fix: If player was broke and now has chips during payout phase,
       // clear result screen so they can see the bet board (disabled until betting opens)
-      const status = firebaseSnapshot.meta?.status;
+      const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
       const me = players?.[myKey];
       const oldMe = oldPlayers?.[myKey];
       if (status === 'payout' && me && oldMe) {
@@ -204,17 +236,17 @@ function attachRoomListener() {
       const myBets = (bets && bets[myKey]) || {};
       // Merge: prefer local pending writes if present, else use server.
       const merged = {};
-      Object.keys(myBets).forEach((k) => {
-        merged[k] = myBets[k]?.chips || 0;
+      if (_clearWritePending === 0) {
+        Object.keys(myBets).forEach((key) => {
+          merged[key] = myBets[key]?.chips || 0;
+        });
+      }
+      // Preserve only optimistic values that still have a timer or serialized
+      // Firebase mutation pending; all other values follow server truth.
+      Object.entries(localBets).forEach(([key, chips]) => {
+        if (chips > 0 && isBetWritePending(key)) merged[key] = chips;
       });
-      // If local has entries not yet written, keep them
-      Object.keys(localBets).forEach((k) => {
-        if (localBets[k] > 0 && !merged[k]) merged[k] = localBets[k];
-      });
-      // Don't override local if a write is in flight for that key
-      _betWriteTimers.forEach((_, k) => { merged[k] = localBets[k]; });
-      // Apply only if room status is betting (else we want server truth)
-      if (firebaseSnapshot.meta?.status === 'betting') {
+      if (firebaseSnapshot.game?.phase === 'betting') {
         localBets = merged;
       }
       renderBetBoard();
@@ -231,25 +263,19 @@ function attachRoomListener() {
     onPayoutsChange: (payouts) => {
       firebaseSnapshot.payouts = payouts;
       renderResultPanel();
-      // Show "you won X" toast on payout — winner only celebrates with
-      // confetti + win sound; loser hears a soft error chime; player
-      // who just went broke gets a louder error to mark the moment.
-      const status = firebaseSnapshot.meta?.status;
+      const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
       if (status === 'payout' && payouts && playerIndex != null) {
         const my = payouts[`player_${playerIndex}`];
-        if (my && !my._shown) {
-          my._shown = true;
+        const payoutKey = my ? `${my.roundNumber}:${my.revision}` : null;
+        if (my && payoutKey !== shownPayoutKey) {
+          shownPayoutKey = payoutKey;
           if (my.netDelta > 0) {
             showToast(`🏆 You won ${my.netDelta} chips!`, 2400);
             playSound('win');
             burstPhoneConfetti();
           } else if (my.netDelta < 0) {
-            // Result panel below shows the loss in detail; only flag the
-            // moment a player actually goes broke with the louder error.
             const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
-            if (me && (me.broke || (me.chips ?? 0) <= 0)) {
-              playSound('error', 0.7);
-            }
+            if (me && (me.broke || (me.chips ?? 0) <= 0)) playSound('error', 0.7);
           }
         }
       }
@@ -269,7 +295,11 @@ function wirePhoneLobby() {
   const leave = document.getElementById('btn-phone-leave-lobby');
   if (leave) leave.addEventListener('click', async () => {
     if (roomCode != null && playerIndex != null) {
-      try { await leaveRoom(roomCode, playerIndex); } catch (_) {}
+      try {
+        await cancelPlayerDisconnect?.();
+        cancelPlayerDisconnect = null;
+        await leaveRoom(roomCode, playerIndex);
+      } catch (_) {}
     }
     cleanupAndGoHome();
   });
@@ -331,21 +361,43 @@ function wirePhoneGame() {
   }
   const clearBtn = document.getElementById('btn-phone-clear-bets');
   if (clearBtn) clearBtn.addEventListener('click', async () => {
-    if (firebaseSnapshot.meta?.status !== 'betting') return;
+    if ((firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status) !== 'betting' || !activeBetAuthority) return;
+    const authority = { ...activeBetAuthority };
+    const targetRoom = roomCode;
+    const targetPlayer = playerIndex;
+    clearBetWriteTimers();
     localBets = {};
-    if (roomCode != null && playerIndex != null) {
-      try { await clearPlayerBets(roomCode, playerIndex); } catch (_) {}
-    }
     renderBetBoard();
+    if (targetRoom == null || targetPlayer == null) return;
+    try {
+      await enqueueBetMutation(null, async () => {
+        const result = await clearPlayerBets(targetRoom, targetPlayer, authority);
+        if (activeBetAuthority?.roundNumber === authority.roundNumber &&
+            activeBetAuthority?.revision === authority.revision) {
+          reconcileLocalBets(result.playerBets, true);
+        }
+      });
+    } catch (_) {
+      const stillCurrent = activeBetAuthority?.roundNumber === authority.roundNumber &&
+        activeBetAuthority?.revision === authority.revision;
+      if (!stillCurrent) return;
+      reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {}, true);
+      showToast('Bets changed before they could be cleared.');
+    }
   });
 
-  // Wire chip denomination row
-  document.querySelectorAll('.chip-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      selectedDenom = parseInt(btn.dataset.denom, 10);
-      if (!Number.isFinite(selectedDenom) || selectedDenom <= 0) selectedDenom = 25;
-      document.querySelectorAll('.chip-btn').forEach((b) => b.classList.toggle('selected', b === btn));
-    });
+  document.querySelectorAll('.chip-btn[data-denom]').forEach((btn) => {
+    btn.addEventListener('click', () => selectChipDenomination(Number(btn.dataset.denom)));
+  });
+}
+
+function selectChipDenomination(value) {
+  if (!CHIP_DENOMINATIONS.includes(value)) return;
+  selectedDenom = value;
+  document.querySelectorAll('.chip-btn[data-denom]').forEach((button) => {
+    const selected = Number(button.dataset.denom) === value;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   });
 }
 
@@ -410,7 +462,9 @@ function buildBetBoard() {
 }
 
 function onBetCellTap(cell) {
-  if (firebaseSnapshot.meta?.status !== 'betting') return;
+  const game = firebaseSnapshot.game || {};
+  if (game.phase !== 'betting' || !activeBetAuthority ||
+      game.roundNumber !== activeBetAuthority.roundNumber || game.revision !== activeBetAuthority.revision) return;
   const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
   if (!me || me.broke || (me.chips ?? 0) <= 0) return;
 
@@ -419,8 +473,7 @@ function onBetCellTap(cell) {
   const target = targetRaw == null || targetRaw === '' ? null : parseInt(targetRaw, 10);
   const key = betKey(type, target);
   if (!key) return;
-  // Guard against NaN denomination (rapid tap can corrupt selectedDenom)
-  const denom = Number.isFinite(selectedDenom) && selectedDenom > 0 ? selectedDenom : 0;
+  const denom = CHIP_DENOMINATIONS.includes(selectedDenom) ? selectedDenom : 0;
   if (!denom) return;
 
   // Check we're not over-betting
@@ -466,20 +519,101 @@ function burstPhoneConfetti() {
   } catch (_) {}
 }
 
-function scheduleBetWrite(key, type, target) {
-  // Debounce per-key so rapid taps batch into one Firebase write.
-  if (_betWriteTimers.has(key)) clearTimeout(_betWriteTimers.get(key));
-  const t = setTimeout(async () => {
-    _betWriteTimers.delete(key);
-    if (roomCode == null || playerIndex == null) return;
-    const chips = localBets[key] || 0;
-    try {
-      await writeBet(roomCode, playerIndex, key, chips > 0 ? { type, target, chips } : null);
-    } catch (err) {
-      console.warn('writeBet failed:', err.message);
+function clearBetWriteTimers() {
+  _betWriteTimers.forEach((timer) => clearTimeout(timer));
+  _betWriteTimers.clear();
+}
+
+function cancelPendingBetWrites() {
+  clearBetWriteTimers();
+  _betWriteGeneration += 1;
+  _pendingBetWrites.clear();
+  _clearWritePending = 0;
+}
+
+function isBetWritePending(key) {
+  return _betWriteTimers.has(key) || (_pendingBetWrites.get(key) || 0) > 0;
+}
+
+function enqueueBetMutation(key, operation) {
+  const generation = _betWriteGeneration;
+  if (key == null) {
+    _clearWritePending += 1;
+  } else {
+    _pendingBetWrites.set(key, (_pendingBetWrites.get(key) || 0) + 1);
+  }
+
+  const run = () => generation === _betWriteGeneration ? operation() : undefined;
+  const task = _betWriteChain.then(run, run);
+  _betWriteChain = task.catch(() => {});
+  return task.finally(() => {
+    if (generation !== _betWriteGeneration) return;
+    if (key == null) {
+      _clearWritePending = Math.max(0, _clearWritePending - 1);
+    } else {
+      const remaining = (_pendingBetWrites.get(key) || 1) - 1;
+      if (remaining > 0) _pendingBetWrites.set(key, remaining);
+      else _pendingBetWrites.delete(key);
     }
+  });
+}
+
+function reconcileLocalBets(serverBook, preservePending = false) {
+  const reconciled = {};
+  if (_clearWritePending === 0) {
+    Object.entries(serverBook || {}).forEach(([key, bet]) => {
+      if (Number.isSafeInteger(bet?.chips) && bet.chips > 0) reconciled[key] = bet.chips;
+    });
+  }
+  if (preservePending) {
+    Object.entries(localBets).forEach(([key, chips]) => {
+      if (chips > 0 && isBetWritePending(key)) reconciled[key] = chips;
+    });
+  }
+  localBets = reconciled;
+  renderBetBoard();
+}
+
+function scheduleBetWrite(key, type, target) {
+  if (!activeBetAuthority) return;
+  if (_betWriteTimers.has(key)) clearTimeout(_betWriteTimers.get(key));
+  const authority = { ...activeBetAuthority };
+  const timer = setTimeout(() => {
+    _betWriteTimers.delete(key);
+    const targetRoom = roomCode;
+    const targetPlayer = playerIndex;
+    const chips = localBets[key] || 0;
+    if (targetRoom == null || targetPlayer == null) return;
+
+    void enqueueBetMutation(key, async () => {
+      const game = firebaseSnapshot.game || {};
+      if (game.phase !== 'betting' || game.roundNumber !== authority.roundNumber ||
+          game.revision !== authority.revision) {
+        reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {}, true);
+        return;
+      }
+      try {
+        const result = await writeBet(
+          targetRoom, targetPlayer, key,
+          chips > 0 ? { type, target, chips } : null,
+          authority,
+        );
+        if (activeBetAuthority?.roundNumber === authority.roundNumber &&
+            activeBetAuthority?.revision === authority.revision) {
+          reconcileLocalBets(result.playerBets, true);
+        }
+      } catch (err) {
+        const stillCurrent = activeBetAuthority?.roundNumber === authority.roundNumber &&
+          activeBetAuthority?.revision === authority.revision;
+        if (!stillCurrent) return;
+        cancelPendingBetWrites();
+        reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {});
+        showToast('Bet was rejected; your chips were reconciled.');
+        console.warn('writeBet rejected:', err.message);
+      }
+    });
   }, 220);
-  _betWriteTimers.set(key, t);
+  _betWriteTimers.set(key, timer);
 }
 
 /**
@@ -489,7 +623,7 @@ function renderBetBoard() {
   const board = document.getElementById('phone-bet-board');
   if (!board || !board.dataset._built) return;
 
-  const status = firebaseSnapshot.meta?.status;
+  const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
   const isBetting = status === 'betting';
   board.classList.toggle('locked', !isBetting);
   // Player tag
@@ -556,15 +690,20 @@ function renderBetBoard() {
  *  showing them after the round transitions or Firebase clears them. Called
  *  the moment the meta status flips to 'spinning'. */
 function snapshotLastRoundBets() {
-  lastRoundBets = { ...localBets };
-  // Also keep the full bet objects so resolveBets() can compute outcomes.
+  const game = firebaseSnapshot.game || {};
+  const roundKey = `${game.roundNumber}:${game.revision}`;
+  if (lastRoundKey === roundKey) return;
+  lastRoundKey = roundKey;
+  const myKey = `player_${playerIndex}`;
+  const locked = game.lockedBets?.[myKey] || {};
+  lastRoundBets = {};
   lastRoundBetObjects = [];
-  Object.keys(lastRoundBets).forEach((k) => {
-    const chips = lastRoundBets[k];
-    if (!chips) return;
-    const { type, target } = parseBetKey(k);
-    if (type) lastRoundBetObjects.push({ type, target, chips });
+  Object.entries(locked).forEach(([key, bet]) => {
+    if (!Number.isSafeInteger(bet?.chips) || bet.chips <= 0) return;
+    lastRoundBets[key] = bet.chips;
+    lastRoundBetObjects.push({ type: bet.type, target: bet.target ?? null, chips: bet.chips });
   });
+  localBets = { ...lastRoundBets };
 }
 
 /** Reverses betKey() — returns {type, target} for a stored bet key. */
@@ -594,7 +733,7 @@ function renderResultPanel() {
   const board = document.getElementById('phone-bet-board');
   if (!panel || !board) return;
 
-  const status = firebaseSnapshot.meta?.status;
+  const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
   const isResultPhase = (status === 'spinning' || status === 'payout');
   // No round to show — hide and restore the bet board.
   if (!isResultPhase || lastRoundBetObjects.length === 0) {
@@ -739,7 +878,7 @@ function renderPlayerTag() {
 }
 
 function renderHeader() {
-  const status = firebaseSnapshot.meta?.status;
+  const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
   const headerEl = document.getElementById('phone-header-status');
   if (!headerEl) return;
   if (status === 'betting') {
@@ -781,7 +920,7 @@ let _phoneCountdownTimer = null;
 function startCountdownDisplay() {
   if (_phoneCountdownTimer) { clearInterval(_phoneCountdownTimer); _phoneCountdownTimer = null; }
   _phoneCountdownTimer = setInterval(() => {
-    const status = firebaseSnapshot.meta?.status;
+    const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
     if (status !== 'betting') {
       clearInterval(_phoneCountdownTimer);
       _phoneCountdownTimer = null;
@@ -822,15 +961,24 @@ function showHelpModal() {
 function cleanupAndGoHome() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (_phoneCountdownTimer) { clearInterval(_phoneCountdownTimer); _phoneCountdownTimer = null; }
-  _betWriteTimers.forEach((t) => clearTimeout(t));
-  _betWriteTimers.clear();
+  cancelPendingBetWrites();
+  if (cancelPlayerDisconnect) { void cancelPlayerDisconnect(); cancelPlayerDisconnect = null; }
+  dismissConfirmModals();
+  const helpModal = document.getElementById('help-modal');
+  if (helpModal) helpModal.hidden = true;
   clearSession();
   roomCode = null;
   playerIndex = null;
   firebaseSnapshot = {};
+  previousPlayers = {};
   localBets = {};
   lastRoundBets = {};
   lastRoundBetObjects = [];
+  activeBetAuthority = null;
+  lastPhaseKey = null;
+  lastRoundKey = null;
+  shownPayoutKey = null;
+  _joinInFlight = false;
   delete document.body.dataset.mode;
   showScreen('home');
 }

@@ -1,16 +1,3 @@
-/**
- * Sound Manager — Roulette MP
- *
- * AudioContext-first with HTML Audio fallback.
- * Mute toggle persisted in localStorage.
- *
- * iOS / iPad notes:
- *   - AudioContext can be suspended after inactivity. We resume on every
- *     user gesture and kick a silent buffer to keep it alive.
- *   - Pre-warmed HTML <audio> elements (created during a real gesture) are
- *     iOS's most reliable fallback when the AudioContext is busy/suspended.
- */
-
 const SOUND_FILES = {
   chip: '/sounds/chip-click.mp3',
   betClose: '/sounds/bet-close.mp3',
@@ -21,32 +8,44 @@ const SOUND_FILES = {
 };
 
 const MUTE_KEY = 'roulette_mp_muted';
+const GESTURE_EVENTS = ['pointerdown', 'touchstart', 'keydown'];
 
 let audioCtx = null;
 const soundBuffers = {};
-/** Pre-warmed HTML audio elements (created on first gesture). */
 const audioEls = {};
-let initialized = false;
+let listenersAttached = false;
+let preloadStarted = false;
 let warmedHtmlAudio = false;
 let silentBuffer = null;
+let bgMusicAudio = null;
+let bgMusicWanted = false;
+let bgMusicVolume = 0.3;
+let musicWasPlayingBeforeHidden = false;
 
 function getAudioContext() {
   if (!audioCtx) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) audioCtx = new Ctx();
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (Context) audioCtx = new Context();
   }
   return audioCtx;
 }
 
+function resumeContext() {
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'suspended') return;
+  const result = ctx.resume();
+  result?.catch?.(() => {});
+}
+
 function kickSilent() {
   const ctx = getAudioContext();
-  if (!ctx) return;
+  if (!ctx || ctx.state !== 'running') return;
   try {
     if (!silentBuffer) silentBuffer = ctx.createBuffer(1, 1, 22050);
-    const src = ctx.createBufferSource();
-    src.buffer = silentBuffer;
-    src.connect(ctx.destination);
-    src.start(0);
+    const source = ctx.createBufferSource();
+    source.buffer = silentBuffer;
+    source.connect(ctx.destination);
+    source.start(0);
   } catch (_) {}
 }
 
@@ -54,63 +53,95 @@ async function loadBuffer(url) {
   const ctx = getAudioContext();
   if (!ctx) return null;
   try {
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const ab = await r.arrayBuffer();
-    return await ctx.decodeAudioData(ab);
+    const response = await fetch(url);
+    if (!response.ok || response.status !== 200) return null;
+    return await ctx.decodeAudioData(await response.arrayBuffer());
   } catch (_) {
     return null;
   }
 }
 
 function preloadSounds() {
+  if (preloadStarted) return;
+  preloadStarted = true;
   Object.entries(SOUND_FILES).forEach(([name, url]) => {
-    loadBuffer(url).then((buf) => { if (buf) soundBuffers[name] = buf; });
+    loadBuffer(url).then((buffer) => {
+      if (buffer) soundBuffers[name] = buffer;
+    });
   });
 }
 
-/** Pre-create HTML <audio> elements during a real user gesture so iOS
- *  treats them as authorised and they remain playable as a fallback. */
 function warmHtmlAudio() {
   if (warmedHtmlAudio) return;
   warmedHtmlAudio = true;
   Object.entries(SOUND_FILES).forEach(([name, url]) => {
     try {
-      const a = new Audio(url);
-      a.preload = 'auto';
-      a.load();
-      audioEls[name] = a;
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      audio.load();
+      audioEls[name] = audio;
     } catch (_) {}
   });
 }
 
+function handleUserGesture() {
+  if (!isMuted()) {
+    resumeContext();
+    kickSilent();
+  }
+  warmHtmlAudio();
+  preloadSounds();
+  if (bgMusicWanted && bgMusicAudio?.paused && !isMuted() && document.visibilityState === 'visible') {
+    bgMusicAudio.play().catch(() => {});
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    musicWasPlayingBeforeHidden = Boolean(bgMusicAudio && !bgMusicAudio.paused);
+    bgMusicAudio?.pause();
+    return;
+  }
+  if (!isMuted()) resumeContext();
+  if (musicWasPlayingBeforeHidden && bgMusicWanted && bgMusicAudio && !isMuted()) {
+    bgMusicAudio.play().catch(() => {});
+  }
+  musicWasPlayingBeforeHidden = false;
+}
+
+function handlePageShow() {
+  if (!isMuted()) resumeContext();
+}
+
 export function initAudio() {
   getAudioContext();
-  if (!initialized) preloadSounds();
-  const handler = () => {
-    const ctx = getAudioContext();
-    if (ctx) {
-      if (ctx.state === 'suspended') {
-        try { ctx.resume(); } catch (_) {}
-      }
-      kickSilent();
-    }
-    warmHtmlAudio();
-    if (!initialized) {
-      initialized = true;
-      preloadSounds();
-    }
-  };
-  ['click', 'touchstart', 'keydown'].forEach((ev) => {
-    document.addEventListener(ev, handler, { passive: true });
+  preloadSounds();
+  if (listenersAttached) return;
+  listenersAttached = true;
+  GESTURE_EVENTS.forEach((eventName) => {
+    document.addEventListener(eventName, handleUserGesture, { passive: true });
   });
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pageshow', handlePageShow);
+}
+
+export function disposeAudio() {
+  if (!listenersAttached) return;
+  listenersAttached = false;
+  GESTURE_EVENTS.forEach((eventName) => {
+    document.removeEventListener(eventName, handleUserGesture);
+  });
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  window.removeEventListener('pageshow', handlePageShow);
 }
 
 export function isMuted() {
   try {
-    const v = localStorage.getItem(MUTE_KEY);
-    return v === '1' || v === 'true';
-  } catch (_) { return false; }
+    const value = localStorage.getItem(MUTE_KEY);
+    return value === '1' || value === 'true';
+  } catch (_) {
+    return false;
+  }
 }
 
 function setMuted(muted) {
@@ -118,153 +149,99 @@ function setMuted(muted) {
 }
 
 export function toggleMute() {
-  const next = !isMuted();
-  setMuted(next);
-  return next;
+  const muted = !isMuted();
+  setMuted(muted);
+  if (muted) {
+    bgMusicAudio?.pause();
+  } else {
+    resumeContext();
+    if (bgMusicWanted) {
+      if (bgMusicAudio) bgMusicAudio.play().catch(() => {});
+      else startBackgroundMusic(bgMusicVolume);
+    }
+  }
+  return muted;
 }
 
-export function playSound(name, volume = 1.0) {
+export function playSound(name, volume = 1) {
   if (isMuted()) return;
   const url = SOUND_FILES[name];
   if (!url) return;
   const ctx = getAudioContext();
-  if (ctx && ctx.state === 'suspended') {
-    try { ctx.resume(); } catch (_) {}
-  }
-  // Path 1: AudioContext buffer source (best quality, lowest latency)
-  if (ctx && ctx.state === 'running' && soundBuffers[name]) {
+  if (ctx?.state === 'suspended') resumeContext();
+
+  if (ctx?.state === 'running' && soundBuffers[name]) {
     try {
-      const src = ctx.createBufferSource();
-      src.buffer = soundBuffers[name];
+      const source = ctx.createBufferSource();
       const gain = ctx.createGain();
-      gain.gain.value = volume;
-      src.connect(gain);
+      source.buffer = soundBuffers[name];
+      gain.gain.value = Math.max(0, Math.min(1, volume));
+      source.connect(gain);
       gain.connect(ctx.destination);
-      src.start(0);
+      source.start(0);
       return;
     } catch (_) {}
   }
-  // Path 2: pre-warmed HTML <audio> element (survives ctx suspension on iOS)
+
   const warmed = audioEls[name];
   if (warmed) {
     try {
       warmed.currentTime = 0;
-      warmed.volume = volume;
-      const p = warmed.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
+      warmed.volume = Math.max(0, Math.min(1, volume));
+      warmed.play().catch(() => {});
       return;
     } catch (_) {}
   }
-  // Path 3: fresh Audio element (last resort)
+
   try {
-    const a = new Audio(url);
-    a.volume = volume;
-    a.play().catch(() => {});
+    const audio = new Audio(url);
+    audio.volume = Math.max(0, Math.min(1, volume));
+    audio.play().catch(() => {});
   } catch (_) {}
 }
 
-/* ======= BACKGROUND MUSIC ======= */
-
-let bgMusicAudio = null;
-let bgMusicSourceNode = null;
-let bgMusicGainNode = null;
-let bgMusicStartTime = 0;
-let bgMusicPausedAt = 0;
-
-/**
- * Starts looping background music at specified volume (0.0 - 1.0).
- * Uses HTML Audio element for reliable looping across all platforms.
- */
-export function startBackgroundMusic(volume = 0.3) {
-  if (isMuted()) return;
-  
-  // Stop any existing music first
-  stopBackgroundMusic();
-  
-  const url = SOUND_FILES.music;
-  if (!url) return;
-  
+function destroyBackgroundMusic() {
+  if (!bgMusicAudio) return;
   try {
-    bgMusicAudio = new Audio(url);
+    bgMusicAudio.pause();
+    bgMusicAudio.currentTime = 0;
+  } catch (_) {}
+  bgMusicAudio = null;
+}
+
+export function startBackgroundMusic(volume = 0.3) {
+  bgMusicWanted = true;
+  bgMusicVolume = Math.max(0, Math.min(1, volume));
+  destroyBackgroundMusic();
+  if (isMuted()) return;
+
+  try {
+    bgMusicAudio = new Audio(SOUND_FILES.music);
     bgMusicAudio.loop = true;
-    bgMusicAudio.volume = volume;
+    bgMusicAudio.volume = bgMusicVolume;
     bgMusicAudio.preload = 'auto';
-    
-    const playPromise = bgMusicAudio.play();
-    if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise.catch(() => {
-        // If autoplay is blocked, music will start on next user interaction
-        console.log('Background music autoplay blocked - will start on next interaction');
-      });
-    }
-  } catch (err) {
-    console.error('Failed to start background music:', err);
+    bgMusicAudio.play().catch(() => {});
+  } catch (_) {
+    bgMusicAudio = null;
   }
 }
 
-/**
- * Stops the background music.
- */
 export function stopBackgroundMusic() {
-  if (bgMusicAudio) {
-    try {
-      bgMusicAudio.pause();
-      bgMusicAudio.currentTime = 0;
-      bgMusicAudio = null;
-    } catch (_) {}
-  }
-  if (bgMusicSourceNode) {
-    try {
-      bgMusicSourceNode.stop();
-      bgMusicSourceNode.disconnect();
-      bgMusicSourceNode = null;
-    } catch (_) {}
-  }
-  if (bgMusicGainNode) {
-    try {
-      bgMusicGainNode.disconnect();
-      bgMusicGainNode = null;
-    } catch (_) {}
-  }
+  bgMusicWanted = false;
+  musicWasPlayingBeforeHidden = false;
+  destroyBackgroundMusic();
 }
 
-/**
- * Sets background music volume (0.0 - 1.0).
- */
 export function setBackgroundMusicVolume(volume) {
-  if (bgMusicAudio) {
-    try {
-      bgMusicAudio.volume = Math.max(0, Math.min(1, volume));
-    } catch (_) {}
-  }
-  if (bgMusicGainNode) {
-    try {
-      bgMusicGainNode.gain.value = Math.max(0, Math.min(1, volume));
-    } catch (_) {}
-  }
+  bgMusicVolume = Math.max(0, Math.min(1, volume));
+  if (bgMusicAudio) bgMusicAudio.volume = bgMusicVolume;
 }
 
-/**
- * Pauses background music (can be resumed).
- */
 export function pauseBackgroundMusic() {
-  if (bgMusicAudio) {
-    try {
-      bgMusicAudio.pause();
-    } catch (_) {}
-  }
+  bgMusicAudio?.pause();
 }
 
-/**
- * Resumes paused background music.
- */
 export function resumeBackgroundMusic() {
-  if (bgMusicAudio && bgMusicAudio.paused && !isMuted()) {
-    try {
-      const playPromise = bgMusicAudio.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(() => {});
-      }
-    } catch (_) {}
-  }
+  if (!bgMusicAudio || !bgMusicWanted || isMuted()) return;
+  bgMusicAudio.play().catch(() => {});
 }

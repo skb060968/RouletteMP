@@ -1,97 +1,92 @@
-/**
- * Roulette MP — Game Engine
- *
- * Pure functions for the TV-host's authoritative round resolution.
- * No DOM, no Firebase. Reads bets + chip balances → returns updated balances
- * and per-player payout summaries.
- */
+/** Pure, defensive roulette settlement helpers. */
+import { resolveBets, validateStoredBet } from './bet-validator.js';
 
-import { resolveBets, validateBet } from './bet-validator.js';
-
-/** Default starting chip balance per player. */
 export const STARTING_CHIPS = 1000;
-
-/** Top-up amount given to broke players when host taps "Top Up". */
 export const TOP_UP_AMOUNT = 500;
+const PLAYER_KEY = /^player_([0-9]|1[01])$/;
+const MAX_BETS_PER_PLAYER = 49;
+
+function assertPlainObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+}
 
 /**
- * Resolves a round given the current Firebase snapshots. Returns:
- *   {
- *     winningNumber,
- *     newBalances: { player_0: 950, ... },
- *     newBroke:    { player_0: false, ... },
- *     payouts:     { player_0: { wonChips, betAmount, netDelta }, ... },
- *   }
- *
- * The TV uses these values to write back to Firebase atomically.
- *
- * @param {object} bets        firebaseSnapshot.bets — { player_0: { betKey: {type,target,chips}, ... }, ... }
- * @param {object} players     firebaseSnapshot.players — { player_0: { chips, broke, ... }, ... }
- * @param {number} winningNumber
+ * Resolve a room's locked books defensively. Malformed data still rejects the
+ * settlement, but aggregate over-bets are reduced deterministically by key so
+ * an untrusted player cannot block the host or wager more than their balance.
  */
-export function resolveRound(bets, players, winningNumber) {
+export function resolveRound(bets, players, winningNumber, authority = null) {
+  const books = bets || {};
+  const roster = players || {};
+  assertPlainObject(books, 'Bet books');
+  assertPlainObject(roster, 'Players');
+
+  for (const [playerKey, book] of Object.entries(books)) {
+    if (!PLAYER_KEY.test(playerKey) || !roster[playerKey]) {
+      if (book && Object.keys(book).length) throw new Error('Bet book has no valid owner');
+    }
+  }
+
   const newBalances = {};
   const newBroke = {};
   const payouts = {};
+  const acceptedBets = {};
 
-  Object.keys(players || {}).forEach((key) => {
-    const player = players[key] || {};
-    const startingChips = typeof player.chips === 'number' ? player.chips : STARTING_CHIPS;
-
-    const playerBets = bets && bets[key] ? Object.values(bets[key]) : [];
-    const validBets = playerBets.filter(validateBet);
-
-    if (validBets.length === 0) {
-      // No bets — no change.
-      newBalances[key] = startingChips;
-      newBroke[key] = startingChips <= 0;
-      payouts[key] = { wonChips: 0, betAmount: 0, netDelta: 0 };
-      return;
+  for (const [playerKey, player] of Object.entries(roster)) {
+    if (!PLAYER_KEY.test(playerKey)) throw new Error('Malformed player key');
+    assertPlainObject(player, 'Player');
+    const startingChips = player.chips;
+    if (!Number.isSafeInteger(startingChips) || startingChips < 0) {
+      throw new Error('Malformed player balance');
     }
 
+    const book = books[playerKey] || {};
+    assertPlainObject(book, 'Player bet book');
+    const entries = Object.entries(book).sort(([left], [right]) => left.localeCompare(right));
+    if (entries.length > MAX_BETS_PER_PLAYER) throw new Error('Too many bets');
+
+    const validBets = [];
+    const acceptedBook = {};
+    let acceptedStake = 0;
+    for (const [key, bet] of entries) {
+      if (!validateStoredBet(key, bet, authority)) throw new Error('Malformed bet book');
+      if (acceptedStake + bet.chips > startingChips) continue;
+      acceptedStake += bet.chips;
+      validBets.push(bet);
+      acceptedBook[key] = bet;
+    }
+    if (Object.keys(acceptedBook).length) acceptedBets[playerKey] = acceptedBook;
+
     const { totalReturn, totalStake } = resolveBets(validBets, winningNumber);
+    const newChips = startingChips - totalStake + totalReturn;
+    if (!Number.isSafeInteger(newChips) || newChips < 0) throw new Error('Unsafe balance');
 
-    // Players' bets were placed against their balance, but at this point
-    // we haven't actually debited yet — the host engine debits at resolution
-    // (so a refresh during betting doesn't lose chips). Net change = return - stake.
-    const newChips = Math.max(0, startingChips - totalStake + totalReturn);
-
-    newBalances[key] = newChips;
-    newBroke[key] = newChips <= 0;
-    payouts[key] = {
+    newBalances[playerKey] = newChips;
+    newBroke[playerKey] = newChips === 0;
+    payouts[playerKey] = {
       wonChips: totalReturn,
       betAmount: totalStake,
       netDelta: totalReturn - totalStake,
     };
-  });
+  }
 
-  return { winningNumber, newBalances, newBroke, payouts };
+  return { winningNumber, newBalances, newBroke, payouts, acceptedBets };
 }
 
-/**
- * Top-up logic: returns updated balances giving every broke player TOP_UP_AMOUNT.
- * Called when host taps "Top Up Broke".
- */
 export function applyTopUp(players) {
   const newBalances = {};
   const newBroke = {};
-  Object.keys(players || {}).forEach((key) => {
-    const player = players[key] || {};
-    const isBroke = !!player.broke || (player.chips || 0) <= 0;
-    if (isBroke) {
-      newBalances[key] = TOP_UP_AMOUNT;
-      newBroke[key] = false;
-    } else {
-      newBalances[key] = player.chips || 0;
-      newBroke[key] = false;
-    }
+  Object.entries(players || {}).forEach(([key, player]) => {
+    const chips = Number.isSafeInteger(player?.chips) && player.chips >= 0 ? player.chips : 0;
+    const broke = !!player?.broke || chips === 0;
+    newBalances[key] = broke ? TOP_UP_AMOUNT : chips;
+    newBroke[key] = false;
   });
   return { newBalances, newBroke };
 }
 
-/**
- * Reset logic: returns updated balances giving every player STARTING_CHIPS.
- */
 export function applyReset(players) {
   const newBalances = {};
   const newBroke = {};
@@ -102,11 +97,12 @@ export function applyReset(players) {
   return { newBalances, newBroke };
 }
 
-/**
- * Returns the total amount currently committed to bets for a single player.
- * Used by the phone to enforce "can't bet more than balance".
- */
 export function totalCommitted(playerBets) {
-  if (!playerBets) return 0;
-  return Object.values(playerBets).reduce((sum, b) => sum + (b.chips || 0), 0);
+  let total = 0;
+  for (const bet of Object.values(playerBets || {})) {
+    if (!Number.isSafeInteger(bet?.chips) || bet.chips <= 0) return Number.POSITIVE_INFINITY;
+    total += bet.chips;
+    if (!Number.isSafeInteger(total)) return Number.POSITIVE_INFINITY;
+  }
+  return total;
 }

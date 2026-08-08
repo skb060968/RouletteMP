@@ -16,30 +16,27 @@
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">
   </head>
   <body>
-
-    <!-- ===================== HOME ===================== -->
-    <section id="home" class="screen home-screen" aria-label="Roulette MP home">
+    <section id="home" class="screen home-screen" aria-labelledby="home-title">
       <header class="home-header">
-        <h1 class="home-title">ROULETTE MULTIPLAYER</h1>
+        <h1 id="home-title" class="home-title">ROULETTE MULTIPLAYER</h1>
       </header>
+      <p id="app-status" class="app-status" role="alert" hidden></p>
       <div class="home-buttons">
         <button id="btn-home-tv" class="btn primary big" type="button">HOST</button>
         <button id="btn-home-player" class="btn secondary big" type="button">📱 Join as Player</button>
       </div>
     </section>
 
-    <!-- ===================== TV CREATE ===================== -->
-    <section id="tv-create" class="screen tv-create-screen" hidden>
-      <h2 class="setup-heading">Host on TV</h2>
+    <section id="tv-create" class="screen tv-create-screen" aria-labelledby="tv-create-heading" hidden>
+      <h2 id="tv-create-heading" class="setup-heading">Host on TV</h2>
       <button id="btn-tv-create-submit" class="btn primary big" type="button">Create Room</button>
       <button id="btn-tv-create-back" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
-    <!-- ===================== TV LOBBY ===================== -->
-    <section id="tv-lobby" class="screen tv-lobby-screen" hidden>
+    <section id="tv-lobby" class="screen tv-lobby-screen" aria-labelledby="tv-lobby-title" hidden>
       <header class="tv-lobby-header">
-        <h1 class="tv-title">ROULETTE MULTIPLAYER</h1>
-        <button id="btn-tv-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+        <h1 id="tv-lobby-title" class="tv-title">ROULETTE MULTIPLAYER</h1>
+        <button id="btn-tv-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
       </header>
       <div class="tv-lobby-body">
         <div class="tv-lobby-left">
@@ -54,163 +51,126 @@
         </div>
         <div class="tv-lobby-right">
           <h2 class="tv-players-heading">Players <span id="tv-lobby-count" class="tv-players-count">0 / 12</span></h2>
-          <ul id="tv-lobby-players" class="tv-lobby-players"></ul>
+          <ul id="tv-lobby-players" class="tv-lobby-players" aria-live="polite"></ul>
         </div>
       </div>
     </section>
 
-    <!-- ===================== TV GAME ===================== -->
-    <section id="tv-game" class="screen tv-game-screen" hidden>
+    <section id="tv-game" class="screen tv-game-screen" aria-labelledby="tv-game-title" hidden>
       <header class="tv-game-header">
-        <h1 class="tv-title">ROULETTE MULTIPLAYER</h1>
+        <h1 id="tv-game-title" class="tv-title">ROULETTE MULTIPLAYER</h1>
       </header>
-
       <div class="tv-game-body">
         <div class="tv-players-side tv-players-left" id="tv-players-left" aria-label="Players left"></div>
         <div class="tv-wheel-wrap">
           <canvas id="tv-wheel-canvas" class="tv-wheel-canvas" role="img" aria-label="Roulette wheel"></canvas>
-          <div id="tv-rien" class="tv-rien">NO MORE BETS</div>
-          <div id="tv-winning-tag" class="tv-winning-tag"></div>
+          <div id="tv-rien" class="tv-rien" role="status" aria-live="assertive">NO MORE BETS</div>
+          <div id="tv-winning-tag" class="tv-winning-tag" role="status" aria-live="polite"></div>
         </div>
         <div class="tv-players-side tv-players-right" id="tv-players-right" aria-label="Players right"></div>
       </div>
-
       <div class="tv-controls-row">
         <button id="btn-tv-open-bets" class="btn primary" type="button">▶ Open Bets</button>
         <button id="btn-tv-spin" class="btn secondary" type="button">🎲 Spin Now</button>
-        <button id="btn-tv-pause-auto" class="btn secondary" type="button" title="Toggle automatic next round">⏸ Pause Auto</button>
+        <button id="btn-tv-pause-auto" class="btn secondary" type="button" aria-pressed="false" title="Toggle automatic next round">⏸ Pause Auto</button>
         <button id="btn-tv-remove-disconnected" class="btn secondary" type="button" title="Remove disconnected players">🚫 Remove Disconnected</button>
         <button id="btn-tv-topup" class="btn secondary" type="button">💸 Top Up Broke</button>
         <button id="btn-tv-reset" class="btn secondary" type="button">↺ Reset Chips</button>
-        <span id="tv-total-bets" class="tv-total-bets">Table: 0 chips</span>
-        <button id="btn-tv-game-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+        <span id="tv-total-bets" class="tv-total-bets" aria-live="polite">Table: 0 chips</span>
+        <button id="btn-tv-game-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
         <button id="btn-tv-end" class="btn-end" type="button">✕ End</button>
       </div>
     </section>
 
-    <!-- ===================== PHONE JOIN ===================== -->
-    <section id="phone-join" class="screen phone-join-screen" hidden>
-      <h2 class="setup-heading">Join Room</h2>
+    <section id="phone-join" class="screen phone-join-screen" aria-labelledby="phone-join-heading" hidden>
+      <h2 id="phone-join-heading" class="setup-heading">Join Room</h2>
       <div class="setup-group">
-        <input id="phone-join-code" class="text-input" type="text" maxlength="4" placeholder="Room Code" autocomplete="off" style="text-transform: uppercase;" />
+        <label class="setup-label" for="phone-join-code">Room code</label>
+        <input id="phone-join-code" class="text-input uppercase-input" type="text" maxlength="4" inputmode="text" autocomplete="off" autocapitalize="characters" />
       </div>
       <div class="setup-group">
-        <input id="phone-join-name" class="text-input" type="text" maxlength="14" placeholder="Your Name" autocomplete="off" />
+        <label class="setup-label" for="phone-join-name">Your name</label>
+        <input id="phone-join-name" class="text-input" type="text" maxlength="14" autocomplete="name" />
       </div>
       <div class="setup-group">
-        <label class="setup-label">Pick an avatar</label>
-        <div class="emoji-picker phone-emoji-picker" role="group">
-          <button class="emoji-btn selected" type="button" data-emoji="🤵">🤵</button>
-          <button class="emoji-btn" type="button" data-emoji="💃">💃</button>
-          <button class="emoji-btn" type="button" data-emoji="🤑">🤑</button>
-          <button class="emoji-btn" type="button" data-emoji="🦊">🦊</button>
-          <button class="emoji-btn" type="button" data-emoji="🐯">🐯</button>
-          <button class="emoji-btn" type="button" data-emoji="🦁">🦁</button>
+        <span id="avatar-picker-label" class="setup-label">Pick an avatar</span>
+        <div class="emoji-picker phone-emoji-picker" role="group" aria-labelledby="avatar-picker-label">
+          <button class="emoji-btn selected" type="button" data-emoji="🤵" aria-label="Choose person in tuxedo avatar" aria-pressed="true">🤵</button>
+          <button class="emoji-btn" type="button" data-emoji="💃" aria-label="Choose dancer avatar" aria-pressed="false">💃</button>
+          <button class="emoji-btn" type="button" data-emoji="🤑" aria-label="Choose money face avatar" aria-pressed="false">🤑</button>
+          <button class="emoji-btn" type="button" data-emoji="🦊" aria-label="Choose fox avatar" aria-pressed="false">🦊</button>
+          <button class="emoji-btn" type="button" data-emoji="🐯" aria-label="Choose tiger avatar" aria-pressed="false">🐯</button>
+          <button class="emoji-btn" type="button" data-emoji="🦁" aria-label="Choose lion avatar" aria-pressed="false">🦁</button>
         </div>
       </div>
       <button id="btn-phone-join-submit" class="btn primary" type="button">Join</button>
       <button id="btn-phone-join-back" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
-    <!-- ===================== PHONE LOBBY ===================== -->
-    <section id="phone-lobby" class="screen phone-lobby-screen" hidden>
+    <section id="phone-lobby" class="screen phone-lobby-screen" aria-labelledby="phone-lobby-title" hidden>
       <header class="phone-lobby-header">
-        <h2 class="phone-lobby-title">Lobby</h2>
-        <button id="btn-phone-lobby-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+        <h2 id="phone-lobby-title" class="phone-lobby-title">Lobby</h2>
+        <button id="btn-phone-lobby-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
       </header>
       <p class="phone-room-code-display">Room: <span id="phone-lobby-code">----</span></p>
       <p class="phone-players-heading">Players <span id="phone-lobby-count" class="phone-players-count">0 / 12</span></p>
-      <ul id="phone-lobby-players" class="phone-lobby-players"></ul>
-      <p class="phone-waiting">Waiting for host to start round…</p>
+      <ul id="phone-lobby-players" class="phone-lobby-players" aria-live="polite"></ul>
+      <p class="phone-waiting" role="status">Waiting for host to start round…</p>
       <button id="btn-phone-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
     </section>
 
-    <!-- ===================== PHONE GAME ===================== -->
-    <section id="phone-game" class="screen phone-game-screen" hidden>
+    <section id="phone-game" class="screen phone-game-screen" aria-label="Roulette game" hidden>
       <div class="phone-player-tag">
         <span id="phone-player-emoji" class="phone-player-emoji">😀</span>
         <span id="phone-player-name" class="phone-player-name">Player</span>
         <span id="phone-player-chips" class="phone-player-chips">💰 1000</span>
       </div>
-
       <header class="phone-game-header">
-        <span id="phone-header-status" class="phone-header-status">Waiting…</span>
+        <span id="phone-header-status" class="phone-header-status" role="status" aria-live="polite">Waiting…</span>
         <span id="phone-round" class="phone-round">Round 0</span>
-        <button id="btn-phone-help" class="icon-btn help-btn" type="button" title="Help">❓</button>
+        <button id="btn-phone-help" class="icon-btn help-btn" type="button" aria-label="How to play" title="Help">❓</button>
       </header>
-
-      <div id="phone-bet-board" class="phone-bet-board" aria-label="Betting felt"></div>
-
-      <div id="phone-result-panel" class="phone-result-panel" aria-label="Round results" hidden></div>
-
-      <div class="phone-chip-row" aria-label="Chip denominations">
-        <button class="chip-btn" type="button" data-denom="1">1</button>
-        <button class="chip-btn" type="button" data-denom="5">5</button>
-        <button class="chip-btn selected" type="button" data-denom="25">25</button>
-        <button class="chip-btn" type="button" data-denom="100">100</button>
+      <div id="phone-bet-board" class="phone-bet-board" role="group" aria-label="Betting felt"></div>
+      <div id="phone-result-panel" class="phone-result-panel" role="status" aria-live="polite" aria-label="Round results" hidden></div>
+      <div class="phone-chip-row" role="group" aria-label="Chip denominations">
+        <button class="chip-btn" type="button" data-denom="1" aria-pressed="false">1</button>
+        <button class="chip-btn" type="button" data-denom="5" aria-pressed="false">5</button>
+        <button class="chip-btn selected" type="button" data-denom="25" aria-pressed="true">25</button>
+        <button class="chip-btn" type="button" data-denom="100" aria-pressed="false">100</button>
         <button id="btn-phone-clear-bets" class="chip-btn clear" type="button">Clear</button>
       </div>
-
       <div class="phone-tray-row">
-        <span id="phone-bet-tray" class="phone-bet-tray">Bet: 0 · Balance: 1000</span>
-        <button id="btn-phone-game-mute" class="icon-btn" type="button" title="Mute">🔊</button>
+        <span id="phone-bet-tray" class="phone-bet-tray" aria-live="polite">Bet: 0 · Balance: 1000</span>
+        <button id="btn-phone-game-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
       </div>
     </section>
 
-    <!-- Help Modal -->
-    <div id="help-modal" class="help-modal-overlay" hidden>
-      <div class="help-modal-box">
-        <button id="btn-help-close" class="help-close-btn" type="button">✕</button>
-        <h2 class="help-title">🎰 How to Play</h2>
-        
+    <div id="help-modal" class="help-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
+      <div class="help-modal-box" tabindex="-1">
+        <button id="btn-help-close" class="help-close-btn" type="button" aria-label="Close how to play dialog">✕</button>
+        <h2 id="help-title" class="help-title">🎰 How to Play</h2>
         <div class="help-content">
           <section class="help-section">
             <h3>🎯 Bet Types</h3>
             <div class="help-bet-list">
-              <div class="help-bet-item">
-                <span class="help-bet-name">Straight Up</span>
-                <span class="help-bet-desc">Single number (0-36)</span>
-                <span class="help-bet-payout">35:1</span>
-              </div>
-              <div class="help-bet-item">
-                <span class="help-bet-name">Red / Black</span>
-                <span class="help-bet-desc">Color of winning number</span>
-                <span class="help-bet-payout">1:1</span>
-              </div>
-              <div class="help-bet-item">
-                <span class="help-bet-name">Even / Odd</span>
-                <span class="help-bet-desc">Parity of winning number</span>
-                <span class="help-bet-payout">1:1</span>
-              </div>
-              <div class="help-bet-item">
-                <span class="help-bet-name">1-18 / 19-36</span>
-                <span class="help-bet-desc">Low or high range</span>
-                <span class="help-bet-payout">1:1</span>
-              </div>
-              <div class="help-bet-item">
-                <span class="help-bet-name">Dozens</span>
-                <span class="help-bet-desc">1st 12, 2nd 12, 3rd 12</span>
-                <span class="help-bet-payout">2:1</span>
-              </div>
-              <div class="help-bet-item">
-                <span class="help-bet-name">Columns</span>
-                <span class="help-bet-desc">Column 1, 2, or 3</span>
-                <span class="help-bet-payout">2:1</span>
-              </div>
+              <div class="help-bet-item"><span class="help-bet-name">Straight Up</span><span class="help-bet-desc">Single number (0-36)</span><span class="help-bet-payout">35:1</span></div>
+              <div class="help-bet-item"><span class="help-bet-name">Red / Black</span><span class="help-bet-desc">Color of winning number</span><span class="help-bet-payout">1:1</span></div>
+              <div class="help-bet-item"><span class="help-bet-name">Even / Odd</span><span class="help-bet-desc">Parity of winning number</span><span class="help-bet-payout">1:1</span></div>
+              <div class="help-bet-item"><span class="help-bet-name">1-18 / 19-36</span><span class="help-bet-desc">Low or high range</span><span class="help-bet-payout">1:1</span></div>
+              <div class="help-bet-item"><span class="help-bet-name">Dozens</span><span class="help-bet-desc">1st 12, 2nd 12, 3rd 12</span><span class="help-bet-payout">2:1</span></div>
+              <div class="help-bet-item"><span class="help-bet-name">Columns</span><span class="help-bet-desc">Column 1, 2, or 3</span><span class="help-bet-payout">2:1</span></div>
             </div>
           </section>
-
           <section class="help-section">
             <h3>📱 How to Bet</h3>
             <ol class="help-instructions">
               <li>Select a chip value (1, 5, 25, or 100)</li>
               <li>Tap on the betting board to place your bet</li>
               <li>Tap multiple times to add more chips to the same bet</li>
-              <li>Use "Clear" to remove all your bets</li>
+              <li>Use “Clear” to remove all your bets</li>
               <li>Wait for the wheel to spin and see if you win!</li>
             </ol>
           </section>
-
           <section class="help-section">
             <h3>💰 Payouts</h3>
             <p class="help-note">When you win, you get your bet back plus the payout. For example, a 100 chip bet on Red that wins pays 100 (your bet) + 100 (1:1 payout) = 200 chips total.</p>
@@ -219,39 +179,16 @@
       </div>
     </div>
 
-    <!-- Update Toast Notification -->
-    <div id="updateToast" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); color: white; padding: 15px 25px; border-radius: 25px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); z-index: 10001; font-family: 'Arial Black', sans-serif; text-align: center; min-width: 300px;">
-        <div style="font-size: 1.1rem; margin-bottom: 8px;">🎉 New Update Available!</div>
-        <div style="font-size: 0.9rem; margin-bottom: 12px; opacity: 0.9;">Refresh to get the latest version</div>
-        <button onclick="reloadForUpdate()" style="background: white; color: #388E3C; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 0.95rem;">Reload Now</button>
-        <button onclick="dismissUpdate()" style="background: transparent; color: white; border: 2px solid white; padding: 8px 18px; border-radius: 20px; font-weight: bold; cursor: pointer; margin-left: 10px; font-size: 0.9rem;">Later</button>
-    </div>
+    <aside id="updateToast" class="update-toast" role="status" aria-live="polite" aria-label="Application update" hidden>
+      <p class="update-toast-title">🎉 New Update Available!</p>
+      <p class="update-toast-message">Reload to get the latest version.</p>
+      <div class="update-toast-actions">
+        <button id="btn-update-reload" class="update-toast-button primary" type="button">Reload Now</button>
+        <button id="btn-update-later" class="update-toast-button secondary" type="button">Later</button>
+      </div>
+    </aside>
 
-    <style>
-        @keyframes slideUp {
-            from {
-                transform: translateX(-50%) translateY(100px);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(-50%) translateY(0);
-                opacity: 1;
-            }
-        }
-    </style>
-
-    <!-- Confetti library -->
-    <script
-      src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
-      async
-      onerror="
-        var s=document.createElement('script');
-        s.src='https://unpkg.com/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
-        s.async=true;
-        document.head.appendChild(s);
-      "
-    ></script>
-
+    <script id="confetti-script" src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" async></script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

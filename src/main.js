@@ -1,12 +1,4 @@
-/**
- * Roulette MP — entry point
- *
- * - Boots the home screen
- * - Restores a saved session if present (TV or phone)
- * - Otherwise wires Home buttons to dispatch into TV or Phone controller
- */
-
-import './firebase-config.js';
+import { authReady } from './firebase-config.js';
 import { showScreen } from './platform-ui.js';
 import { startTvFlow, resumeTvSession } from './tv-controller.js';
 import { startPhoneFlow, resumePhoneSession } from './phone-controller.js';
@@ -18,119 +10,234 @@ function loadSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
 }
 
-function getQueryParam(name) {
-  const m = new URL(location.href).searchParams.get(name);
-  return m || null;
+function showStartupFailure(error) {
+  showScreen('home');
+  const status = document.getElementById('app-status');
+  if (status) {
+    status.textContent = error?.message || 'Roulette MP could not connect. Check your connection and reload.';
+    status.hidden = false;
+  }
+  ['btn-home-tv', 'btn-home-player'].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = true;
+  });
+}
+
+async function runAuthenticated(action) {
+  try {
+    await authReady;
+    await action();
+  } catch (error) {
+    showStartupFailure(error);
+  }
+}
+
+function syncPressedStates(root = document) {
+  root.querySelectorAll?.('.emoji-btn').forEach((button) => {
+    button.setAttribute('aria-pressed', button.classList.contains('selected') ? 'true' : 'false');
+  });
+  root.querySelectorAll?.('.chip-btn[data-denom]').forEach((button) => {
+    button.setAttribute('aria-pressed', button.classList.contains('selected') ? 'true' : 'false');
+  });
+  root.querySelectorAll?.('[id*="mute"].icon-btn').forEach((button) => {
+    const muted = button.textContent.includes('🔇');
+    button.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    button.setAttribute('aria-label', muted ? 'Unmute sounds' : 'Mute sounds');
+    button.title = muted ? 'Unmute' : 'Mute';
+  });
+  const pauseButton = document.getElementById('btn-tv-pause-auto');
+  if (pauseButton) pauseButton.setAttribute('aria-pressed', pauseButton.classList.contains('paused') ? 'true' : 'false');
+}
+
+function setupAccessibleControls() {
+  syncPressedStates();
+  const pressedStateObserver = new MutationObserver(() => syncPressedStates());
+  document.querySelectorAll('[id*="mute"].icon-btn, #btn-tv-pause-auto').forEach((button) => {
+    pressedStateObserver.observe(button, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  });
+  let helpRestoreFocus = null;
+  const helpModal = document.getElementById('help-modal');
+  const helpDialog = helpModal?.querySelector('.help-modal-box');
+
+  const closeHelp = () => {
+    if (!helpModal || helpModal.hidden) return;
+    helpModal.hidden = true;
+    const restore = helpRestoreFocus;
+    helpRestoreFocus = null;
+    restore?.focus();
+  };
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!target) return;
+    if (target.id === 'btn-phone-help') {
+      helpRestoreFocus = target;
+      queueMicrotask(() => document.getElementById('btn-help-close')?.focus());
+    } else if (target.id === 'btn-help-close') {
+      queueMicrotask(() => {
+        const restore = helpRestoreFocus;
+        helpRestoreFocus = null;
+        restore?.focus();
+      });
+    }
+    queueMicrotask(() => syncPressedStates());
+  });
+
+  helpModal?.addEventListener('click', (event) => {
+    if (event.target !== helpModal) return;
+    queueMicrotask(() => {
+      const restore = helpRestoreFocus;
+      helpRestoreFocus = null;
+      restore?.focus();
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!helpModal || helpModal.hidden) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeHelp();
+      return;
+    }
+    if (event.key !== 'Tab' || !helpDialog) return;
+    const focusable = [...helpDialog.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) {
+      event.preventDefault();
+      helpDialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 async function init() {
+  setupAccessibleControls();
+
+  try {
+    await authReady;
+  } catch (error) {
+    showStartupFailure(error);
+    return;
+  }
+
   const btnTv = document.getElementById('btn-home-tv');
   const btnPlayer = document.getElementById('btn-home-player');
-  if (btnTv) btnTv.addEventListener('click', () => startTvFlow());
-  if (btnPlayer) btnPlayer.addEventListener('click', () => {
-    const code = getQueryParam('code');
-    startPhoneFlow(code);
-  });
+  btnTv?.addEventListener('click', () => runAuthenticated(startTvFlow));
+  btnPlayer?.addEventListener('click', () => runAuthenticated(() => startPhoneFlow()));
 
-  // Check for deep link with room code (?room=ABCD)
   const roomCode = initDeepLinkHandler({
     roomInputId: 'phone-join-code',
     joinScreenId: 'phone-join',
-    gameName: 'Roulette MP'
+    gameName: 'Roulette MP',
   });
-  
   if (roomCode) {
-    startPhoneFlow(roomCode);
+    await runAuthenticated(() => startPhoneFlow(roomCode));
     return;
   }
 
-  // Auto-route via ?code=&action=join (legacy support)
-  const queryCode = getQueryParam('code');
-  const action = getQueryParam('action');
-  if (queryCode && action === 'join') {
-    startPhoneFlow(queryCode);
-    return;
-  }
-
-  // Resume
   const session = loadSession();
-  if (session && session.roomCode) {
-    if (session.role === 'tv') {
-      try { await resumeTvSession(session.roomCode); return; } catch (_) {}
-    } else if (session.role === 'phone' && session.playerIndex != null) {
-      try { await resumePhoneSession(session.roomCode, session.playerIndex); return; } catch (_) {}
+  if (session?.roomCode) {
+    try {
+      if (session.role === 'tv') {
+        await authReady;
+        await resumeTvSession(session.roomCode);
+        return;
+      }
+      if (session.role === 'phone' && session.playerIndex != null) {
+        await authReady;
+        await resumePhoneSession(session.roomCode, session.playerIndex);
+        return;
+      }
+    } catch (_) {
+      const status = document.getElementById('app-status');
+      if (status) {
+        status.textContent = 'Your previous room could not be resumed. You can create or join another room.';
+        status.hidden = false;
+      }
     }
   }
 
   showScreen('home');
 }
 
-/* ======= SERVICE WORKER ======= */
-// Update notification functions
-window.reloadForUpdate = function() {
-  window.location.reload();
-};
+function setupConfettiFallback() {
+  const primary = document.getElementById('confetti-script');
+  if (!primary) return;
+  primary.addEventListener('error', () => {
+    if (document.getElementById('confetti-fallback-script')) return;
+    const fallback = document.createElement('script');
+    fallback.id = 'confetti-fallback-script';
+    fallback.src = 'https://unpkg.com/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+    fallback.async = true;
+    document.head.appendChild(fallback);
+  }, { once: true });
+}
 
-window.dismissUpdate = function() {
-  document.getElementById('updateToast').style.display = 'none';
-};
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
 
-function showUpdateToast() {
+  let waitingWorker = null;
+  let updateApproved = false;
+  let reloadStarted = false;
   const toast = document.getElementById('updateToast');
-  if (!toast) return;
-  toast.style.display = 'block';
-  toast.style.animation = 'slideUp 0.4s ease-out';
-}
+  const reloadButton = document.getElementById('btn-update-reload');
+  const laterButton = document.getElementById('btn-update-later');
 
-// Register Service Worker for PWA with update detection
-if ('serviceWorker' in navigator) {
-  let refreshing = false;
-  
-  // Detect controller change and reload
+  const showUpdateToast = (worker) => {
+    waitingWorker = worker;
+    if (toast) toast.hidden = false;
+  };
+  const hideUpdateToast = () => {
+    if (toast) toast.hidden = true;
+  };
+
+  reloadButton?.addEventListener('click', () => {
+    if (!waitingWorker || updateApproved) return;
+    updateApproved = true;
+    reloadButton.disabled = true;
+    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  });
+  laterButton?.addEventListener('click', hideUpdateToast);
+
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (refreshing) return;
-    refreshing = true;
-    console.log('[App] Controller changed, reloading...');
+    if (!updateApproved || reloadStarted) return;
+    reloadStarted = true;
+    window.location.reload();
   });
-  
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('✅ Service Worker registered:', registration);
-        
-        // Check for updates periodically (every 5 minutes)
-        setInterval(() => {
-          registration.update();
-        }, 5 * 60 * 1000);
-        
-        // Listen for waiting service worker
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          console.log('[App] New service worker found');
-          
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('[App] New service worker installed, update available');
-              showUpdateToast();
-            }
-          });
+
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      if (registration.waiting) showUpdateToast(registration.waiting);
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateToast(registration.waiting || worker);
+          }
         });
-      })
-      .catch((error) => {
-        console.log('❌ Service Worker registration failed:', error);
       });
-    
-    // Listen for messages from service worker
-    navigator.serviceWorker.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'UPDATE_AVAILABLE') {
-        console.log(`[App] Update available: ${event.data.version}`);
-        showUpdateToast();
-      }
-    });
-  });
+      window.setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000);
+    } catch (_) {
+      // The app remains usable online when service worker registration fails.
+    }
+  }, { once: true });
 }
 
+setupConfettiFallback();
+setupServiceWorker();
 init();

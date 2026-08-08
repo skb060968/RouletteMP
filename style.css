@@ -1369,3 +1369,73 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
     font-size: 0.85rem;
   }
 }
+
+/* ======= PWA / ACCESSIBILITY HARDENING ======= */
+.uppercase-input { text-transform: uppercase; }
+
+.app-status {
+  width: min(100%, 520px);
+  padding: 12px 16px;
+  border: 1px solid #ffb4ab;
+  border-radius: 10px;
+  background: rgba(120, 20, 20, 0.7);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+.app-status[hidden] { display: none; }
+
+.update-toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 10001;
+  min-width: min(300px, calc(100vw - 32px));
+  padding: 15px 25px;
+  transform: translateX(-50%);
+  border-radius: 25px;
+  background: linear-gradient(135deg, #4caf50, #388e3c);
+  color: #fff;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+  font-family: 'Segoe UI', Arial, sans-serif;
+  text-align: center;
+  animation: update-toast-in 0.4s ease-out;
+}
+.update-toast[hidden] { display: none; }
+.update-toast-title { margin: 0 0 6px; font-size: 1.1rem; font-weight: 800; }
+.update-toast-message { margin: 0 0 12px; font-size: 0.9rem; opacity: 0.95; }
+.update-toast-actions { display: flex; justify-content: center; gap: 10px; }
+.update-toast-button {
+  padding: 9px 18px;
+  border-radius: 20px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.update-toast-button.primary { border: 0; background: #fff; color: #216d25; }
+.update-toast-button.secondary { border: 2px solid #fff; background: transparent; color: #fff; }
+.update-toast-button:disabled { cursor: wait; opacity: 0.7; }
+@keyframes update-toast-in {
+  from { transform: translateX(-50%) translateY(100px); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px #7c5800;
+}
+.qr-modal-content:focus-visible,
+.help-modal-box:focus-visible { outline-color: #ffd700; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

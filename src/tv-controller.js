@@ -9,26 +9,56 @@
 
 import {
   createRoomAsTv, listenRoom, setupTvDisconnectHandler,
-  openBets as fbOpenBets, closeBets as fbCloseBets,
-  revealWinningNumber, applyPayouts, pushResult, applyBalanceUpdates,
+  openBets as fbOpenBets, closeBets as fbCloseBets, settleRound,
+  topUpPlayers, resetPlayerBalances,
   deleteRoom as fbDeleteRoom, rejoinRoom, setPaused, removeDisconnectedPlayers,
-  removePlayer,
+  removePlayer, serverNow,
   MAX_PLAYERS,
 } from './firebase-sync.js';
-import { resolveRound, applyTopUp, applyReset } from './game-engine.js';
 import { WHEEL_SEQUENCE, colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute, startBackgroundMusic, stopBackgroundMusic, setBackgroundMusicVolume } from './sound-manager.js';
-import { showScreen, showToast, confirmModal } from './platform-ui.js';
-import { createShareHandler, showQRCode } from './deep-link-handler.js';
+import { showScreen, showToast, confirmModal, dismissConfirmModals } from './platform-ui.js';
+import { createShareHandler, showQRCode, closeActiveQRCode } from './deep-link-handler.js';
 
 const SESSION_KEY = 'roulette_mp_session';
 
 let roomCode = null;
 let unsubscribe = null;
+let cancelTvDisconnect = null;
 let firebaseSnapshot = {};
 let _autoCloseTimer = null;
 let _countdownTimer = null;
-let _spinAnimationTimer = null;
+let _countdownDeadline = null;
+let _spinInFlight = false;
+let _createInFlight = false;
+const _delayedTimers = new Map();
+
+function delayed(ms, callback) {
+  const id = setTimeout(() => {
+    _delayedTimers.delete(id);
+    callback();
+  }, ms);
+  _delayedTimers.set(id, null);
+  return id;
+}
+
+function delayPromise(ms) {
+  return new Promise((resolve) => {
+    const id = setTimeout(() => {
+      _delayedTimers.delete(id);
+      resolve(true);
+    }, ms);
+    _delayedTimers.set(id, resolve);
+  });
+}
+
+function cancelDelayedTimers() {
+  _delayedTimers.forEach((resolve, id) => {
+    clearTimeout(id);
+    if (resolve) resolve(false);
+  });
+  _delayedTimers.clear();
+}
 
 /* ======= CANVAS WHEEL STATE ======= */
 // Physics state for the canvas-based wheel + ball renderer
@@ -78,7 +108,7 @@ export async function resumeTvSession(savedRoomCode) {
   roomCode = savedRoomCode;
   const result = await rejoinRoom(savedRoomCode, null, 'tv');
   if (!result.success) { clearSession(); showScreen('home'); return; }
-  setupTvDisconnectHandler(roomCode);
+  cancelTvDisconnect = setupTvDisconnectHandler(roomCode);
   attachRoomListener();
   if (result.status === 'lobby') {
     showScreen('tv-lobby');
@@ -101,26 +131,37 @@ function wireTvCreate() {
   const submit = document.getElementById('btn-tv-create-submit');
   const back = document.getElementById('btn-tv-create-back');
   if (submit) submit.addEventListener('click', async () => {
+    if (_createInFlight) return;
+    _createInFlight = true;
+    submit.disabled = true;
+    if (back) back.disabled = true;
     try {
       const result = await createRoomAsTv('TV', '🎰');
       roomCode = result.roomCode;
       saveSession();
-      setupTvDisconnectHandler(roomCode);
+      cancelTvDisconnect = setupTvDisconnectHandler(roomCode);
       attachRoomListener();
       setupLobbyUi();
       showScreen('tv-lobby');
     } catch (err) {
       console.error(err);
       showToast('Failed to create room.');
+    } finally {
+      _createInFlight = false;
+      submit.disabled = false;
+      if (back) back.disabled = false;
     }
   });
-  if (back) back.addEventListener('click', () => showScreen('home'));
+  if (back) back.addEventListener('click', cleanupAndGoHome);
 }
 
 /* ======= ROOM LISTENER ======= */
 function attachRoomListener() {
   if (unsubscribe) unsubscribe();
   unsubscribe = listenRoom(roomCode, {
+    onRoomChange: (room) => {
+      firebaseSnapshot = room;
+    },
     onMetaChange: (meta) => {
       firebaseSnapshot.meta = meta;
       if (meta.status === 'lobby') {
@@ -142,6 +183,21 @@ function attachRoomListener() {
     },
     onGameChange: (game) => {
       firebaseSnapshot.game = game;
+      if (game.phase === 'betting' && game.betsCloseAt) {
+        startCountdown(game.betsCloseAt);
+      } else {
+        stopCountdown();
+      }
+      if (game.phase === 'spinning' && Number.isSafeInteger(game.winningNumber) && !_spinInFlight) {
+        _spinInFlight = true;
+        showScreen('tv-game');
+        setupGameUi();
+        startPhysicsSpin({
+          winningNumber: game.winningNumber,
+          roundNumber: game.roundNumber,
+          revision: game.revision,
+        });
+      }
     },
     onWheelChange: (wheel) => {
       firebaseSnapshot.wheel = wheel;
@@ -176,7 +232,7 @@ function setupLobbyUi() {
       
       removeBtn.disabled = true;
       try {
-        await removePlayer(roomCode, targetIndex);
+        await removePlayer(roomCode, targetIndex, { revision: firebaseSnapshot.game?.revision });
         showToast(`${playerName} removed from room`);
       } catch (err) {
         console.error('Failed to remove player:', err);
@@ -258,7 +314,7 @@ function wireTvLobby() {
 
   const shareBtn = document.getElementById('btn-tv-share-code');
   if (shareBtn) {
-    shareBtn.addEventListener('click', createShareHandler(roomCode, 'Roulette MP'));
+    shareBtn.addEventListener('click', () => createShareHandler(roomCode, 'Roulette MP')());
   }
   
   const qrBtn = document.getElementById('btn-tv-qr-code');
@@ -272,7 +328,8 @@ function wireTvLobby() {
   if (closeBtn) closeBtn.addEventListener('click', async () => {
     const ok = await confirmModal('Close room?', 'All players will be disconnected.', 'Close', 'Cancel');
     if (!ok) return;
-    if (roomCode) { try { await fbDeleteRoom(roomCode); } catch (_) {} }
+    if (roomCode) { try { await cancelTvDisconnect?.(); await fbDeleteRoom(roomCode); } catch (_) {} }
+    cancelTvDisconnect = null;
     cleanupAndGoHome();
   });
 
@@ -305,17 +362,25 @@ function syncPauseUi(paused) {
 
 /* ======= START ROUND (open bets) ======= */
 async function startRound() {
+  if (!roomCode || _spinInFlight) return;
+  const phase = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
+  if (phase !== 'lobby' && phase !== 'payout') return;
   const players = firebaseSnapshot.players || {};
-  const hasAny = Object.values(players).some((p) => (p.chips ?? 0) > 0);
+  const hasAny = Object.values(players).some((p) => Number.isSafeInteger(p?.chips) && p.chips > 0);
   if (!hasAny) {
     showToast('No players have chips. Top Up first.');
     return;
   }
-  showScreen('tv-game');
-  setupGameUi();
-  startBackgroundMusic(0.4); // Start at 40% volume during betting
-  await fbOpenBets(roomCode, 30);
-  startCountdown(30);
+  try {
+    const game = await fbOpenBets(roomCode, 30, { revision: firebaseSnapshot.game?.revision });
+    showScreen('tv-game');
+    setupGameUi();
+    startBackgroundMusic(0.4);
+    if (game.betsCloseAt) startCountdown(game.betsCloseAt);
+  } catch (err) {
+    console.warn('Open bets rejected:', err.message);
+    showToast('Round state changed. Try again.');
+  }
 }
 
 function setupGameUi() {
@@ -355,31 +420,37 @@ function wireTvGame() {
 
   const topUpBtn = document.getElementById('btn-tv-topup');
   if (topUpBtn) topUpBtn.addEventListener('click', async () => {
+    const phase = firebaseSnapshot.game?.phase;
+    if (phase !== 'lobby' && phase !== 'payout') { showToast('Top up after the round settles.'); return; }
     const players = firebaseSnapshot.players || {};
     const broke = Object.entries(players).filter(([, p]) => p.broke || (p.chips ?? 0) === 0);
     if (broke.length === 0) { showToast('No broke players.'); return; }
     const ok = await confirmModal('Top up broke players?', `Give 500 chips to ${broke.length} broke player${broke.length === 1 ? '' : 's'}.`, 'Top Up', 'Cancel');
     if (!ok) return;
-    const { newBalances, newBroke } = applyTopUp(players);
-    await applyBalanceUpdates(roomCode, newBalances, newBroke);
-    showToast('Topped up!');
+    try {
+      await topUpPlayers(roomCode, { revision: firebaseSnapshot.game?.revision });
+      showToast('Topped up!');
+    } catch (err) { showToast('Top up rejected because room state changed.'); }
   });
 
   const resetBtn = document.getElementById('btn-tv-reset');
   if (resetBtn) resetBtn.addEventListener('click', async () => {
+    const phase = firebaseSnapshot.game?.phase;
+    if (phase !== 'lobby' && phase !== 'payout') { showToast('Reset after the round settles.'); return; }
     const ok = await confirmModal('Reset all chips?', 'Every player will go back to 1000 chips.', 'Reset', 'Cancel');
     if (!ok) return;
-    const players = firebaseSnapshot.players || {};
-    const { newBalances, newBroke } = applyReset(players);
-    await applyBalanceUpdates(roomCode, newBalances, newBroke);
-    showToast('All chips reset.');
+    try {
+      await resetPlayerBalances(roomCode, { revision: firebaseSnapshot.game?.revision });
+      showToast('All chips reset.');
+    } catch (err) { showToast('Reset rejected because room state changed.'); }
   });
 
   const endBtn = document.getElementById('btn-tv-end');
   if (endBtn) endBtn.addEventListener('click', async () => {
     const ok = await confirmModal('End game?', 'Close room and return to home.', 'End', 'Cancel');
     if (!ok) return;
-    if (roomCode) { try { await fbDeleteRoom(roomCode); } catch (_) {} }
+    if (roomCode) { try { await cancelTvDisconnect?.(); await fbDeleteRoom(roomCode); } catch (_) {} }
+    cancelTvDisconnect = null;
     cleanupAndGoHome();
   });
 
@@ -394,15 +465,27 @@ function wireTvGame() {
     pauseBtn.addEventListener('click', async () => {
       const currentlyPaused = firebaseSnapshot.meta?.autoPaused || false;
       const newPaused = !currentlyPaused;
-      await setPaused(roomCode, newPaused);
-      syncPauseUi(newPaused);
-      showToast(newPaused ? 'Auto-start paused' : 'Auto-start resumed', 2000);
+      try {
+        await setPaused(roomCode, newPaused, {
+          phase: firebaseSnapshot.game?.phase,
+          revision: firebaseSnapshot.game?.revision,
+        });
+        syncPauseUi(newPaused);
+        showToast(newPaused ? 'Auto-start paused' : 'Auto-start resumed', 2000);
+      } catch (err) {
+        showToast('Pause change rejected because room state changed.');
+      }
     });
   }
 
   const removeDisconnectedBtn = document.getElementById('btn-tv-remove-disconnected');
   if (removeDisconnectedBtn) {
     removeDisconnectedBtn.addEventListener('click', async () => {
+      const phase = firebaseSnapshot.game?.phase;
+      if (phase !== 'lobby' && phase !== 'payout') {
+        showToast('Remove players after the round settles.');
+        return;
+      }
       const players = firebaseSnapshot.players || {};
       const disconnected = Object.keys(players).filter((k) => {
         const p = players[k];
@@ -428,19 +511,24 @@ function wireTvGame() {
       
       if (!ok) return;
       
-      const result = await removeDisconnectedPlayers(roomCode);
-      showToast(`Removed ${result.removed} player${result.removed === 1 ? '' : 's'}`, 2000);
+      try {
+        const result = await removeDisconnectedPlayers(roomCode, { revision: firebaseSnapshot.game?.revision });
+        showToast(`Removed ${result.removed} player${result.removed === 1 ? '' : 's'}`, 2000);
+      } catch (err) {
+        showToast('Removal rejected because room state changed.');
+      }
     });
   }
 }
 
 /* ======= COUNTDOWN ======= */
-function startCountdown(seconds) {
+function startCountdown(deadline) {
+  if (!Number.isFinite(deadline)) return;
+  if (_countdownDeadline === deadline && _countdownTimer) return;
   stopCountdown();
-  const startedAt = Date.now();
-  const totalMs = seconds * 1000;
+  _countdownDeadline = deadline;
   const tick = () => {
-    const remaining = Math.max(0, totalMs - (Date.now() - startedAt));
+    const remaining = Math.max(0, deadline - serverNow());
     const sec = Math.ceil(remaining / 1000);
     const tag = document.getElementById('tv-winning-tag');
     if (tag) {
@@ -449,33 +537,41 @@ function startCountdown(seconds) {
     }
     if (remaining <= 0) {
       stopCountdown();
-      triggerSpin();
+      void triggerSpin();
     }
   };
   tick();
   _countdownTimer = setInterval(tick, 250);
   _autoCloseTimer = setTimeout(() => {
     stopCountdown();
-    triggerSpin();
-  }, totalMs);
+    void triggerSpin();
+  }, Math.max(0, deadline - serverNow()) + 50);
 }
 
 function stopCountdown() {
   if (_countdownTimer) { clearInterval(_countdownTimer); _countdownTimer = null; }
   if (_autoCloseTimer) { clearTimeout(_autoCloseTimer); _autoCloseTimer = null; }
+  _countdownDeadline = null;
 }
 
 /* ======= SPIN ======= */
 async function triggerSpin() {
-  if (!roomCode) return;
-  if (firebaseSnapshot.meta?.status !== 'betting') return;
+  if (!roomCode || _spinInFlight) return;
+  const game = firebaseSnapshot.game || {};
+  if ((game.phase || firebaseSnapshot.meta?.status) !== 'betting') return;
 
+  _spinInFlight = true;
   stopCountdown();
-  await fbCloseBets(roomCode);
+  let spin;
+  try {
+    spin = await fbCloseBets(roomCode, game.roundNumber, game.revision);
+  } catch (err) {
+    _spinInFlight = false;
+    console.warn('Close bets rejected:', err.message);
+    showToast('Spin rejected because the round changed.');
+    return;
+  }
 
-  const winningNumber = Math.floor(Math.random() * 37);
-
-  // "Rien ne va plus" flash
   const rien = document.getElementById('tv-rien');
   if (rien) {
     rien.classList.remove('show');
@@ -484,17 +580,17 @@ async function triggerSpin() {
   }
   playSound('betClose', 1.0);
 
-  // 1s flash delay, then start physics spin
-  setTimeout(() => {
+  delayed(1000, () => {
+    if (!_spinInFlight || roomCode == null) return;
     const tag = document.getElementById('tv-winning-tag');
     if (tag) {
       tag.innerHTML = `<span class="spinning">SPINNING…</span>`;
       tag.classList.add('show');
     }
-    setBackgroundMusicVolume(0.15); // Reduce music volume to 15% during spin
+    setBackgroundMusicVolume(0.15);
     playSound('spin', 1.0);
-    startPhysicsSpin(winningNumber);
-  }, 1000);
+    startPhysicsSpin(spin);
+  });
 }
 
 /**
@@ -526,7 +622,8 @@ function targetAngleForWinning(winningNumber, extraSpins, ballFinalAngle) {
  * EXACT final position with zero drift or snap lunge — the ball arrives
  * smoothly at ballFinalAngle without any hard jump.
  */
-function startPhysicsSpin(winningNumber) {
+function startPhysicsSpin(spin) {
+  const { winningNumber } = spin;
   const SPIN_DURATION = 5.0;
 
   const ballFinalAngle = (Math.PI * 0.15) + Math.random() * (Math.PI * 1.7);
@@ -566,7 +663,7 @@ function startPhysicsSpin(winningNumber) {
       _ball._spinT   = 1.0;
       _ball.dropped  = true; // lock at pocketOrbitR
       drawWheelFrame();
-      onSpinSettled(winningNumber);
+      onSpinSettled(spin);
       return;
     }
 
@@ -578,35 +675,23 @@ function startPhysicsSpin(winningNumber) {
   _rafId = requestAnimationFrame(frame);
 }
 
-async function onSpinSettled(winningNumber) {
-  // 500ms theatrical pause — the silence after the ball lands lets the
-  // reveal land harder than an instant cut.
-  await new Promise((r) => setTimeout(r, 500));
-
-  // Restore music volume to 40% after spin completes
+async function onSpinSettled(spin) {
+  if (!await delayPromise(500) || !_spinInFlight || !roomCode) return;
   setBackgroundMusicVolume(0.4);
 
-  // Reveal + payout
-  await revealWinningNumber(roomCode, winningNumber);
+  let settled;
+  try {
+    settled = await settleRound(roomCode, spin.roundNumber, spin.revision);
+  } catch (err) {
+    _spinInFlight = false;
+    console.error('Settlement rejected:', err);
+    showToast('Round settlement was rejected.');
+    return;
+  }
+  _spinInFlight = false;
+  const winningNumber = settled.game.winningNumber;
+  const payouts = settled.payouts || {};
 
-  const players = firebaseSnapshot.players || {};
-  const bets = firebaseSnapshot.bets || {};
-  const { newBalances, newBroke, payouts } = resolveRound(bets, players, winningNumber);
-
-  // TV is silent at round end — only the wheel-spin and "no more bets"
-  // sounds play on TV. Player phones celebrate their own wins individually.
-
-  // Build a single update bundle
-  const updates = {};
-  Object.keys(newBalances).forEach((k) => {
-    updates[`players/${k}/chips`] = newBalances[k];
-    updates[`players/${k}/broke`] = !!newBroke[k];
-    updates[`payouts/${k}`] = payouts[k];
-  });
-  await applyPayouts(roomCode, updates);
-  await pushResult(roomCode, winningNumber, firebaseSnapshot.game?.lastResults || [], firebaseSnapshot.game?.roundNumber || 0);
-
-  // Reveal UI
   const color = colorOf(winningNumber);
   const tag = document.getElementById('tv-winning-tag');
   if (tag) {
@@ -618,34 +703,26 @@ async function onSpinSettled(winningNumber) {
     tag.classList.add('show', 'reveal');
   }
 
-  // Highlight top winner
   const sorted = Object.entries(payouts).sort((a, b) => (b[1].netDelta || 0) - (a[1].netDelta || 0));
   const top = sorted[0];
   if (top && top[1].netDelta > 0) {
-    const player = (firebaseSnapshot.players || {})[top[0]];
+    const player = settled.players?.[top[0]];
     showToast(`🏆 ${player?.name || 'Player'} won ${top[1].netDelta} chips!`, 3000);
   }
 
-  // After 3s, auto-open the next round (unless paused)
-  setTimeout(() => {
-    if (firebaseSnapshot.meta?.status !== 'ended') {
-      const banner = document.getElementById('tv-winning-tag');
-      if (banner) banner.classList.remove('reveal');
-      
-      // Check if auto-start is paused
-      const autoPaused = firebaseSnapshot.meta?.autoPaused || false;
-      if (!autoPaused) {
-        startRound();
-      } else {
-        // Show "Paused" indicator
-        const tag = document.getElementById('tv-winning-tag');
-        if (tag) {
-          tag.innerHTML = `<span class="paused-msg">⏸ Auto-Start Paused</span>`;
-          tag.classList.add('show');
-        }
-      }
+  const settlementRevision = settled.game.revision;
+  delayed(3500, () => {
+    const game = firebaseSnapshot.game || {};
+    if (game.phase !== 'payout' || game.revision !== settlementRevision) return;
+    const banner = document.getElementById('tv-winning-tag');
+    if (banner) banner.classList.remove('reveal');
+    if (!firebaseSnapshot.meta?.autoPaused) {
+      void startRound();
+    } else if (banner) {
+      banner.innerHTML = `<span class="paused-msg">⏸ Auto-Start Paused</span>`;
+      banner.classList.add('show');
     }
-  }, 3500);
+  });
 }
 
 /* ======= CANVAS WHEEL RENDERER ======= */
@@ -1147,10 +1224,15 @@ function renderTotalBets() {
 /* ======= CLEANUP ======= */
 function cleanupAndGoHome() {
   stopCountdown();
-  if (_spinAnimationTimer) { clearTimeout(_spinAnimationTimer); _spinAnimationTimer = null; }
+  cancelDelayedTimers();
+  _spinInFlight = false;
+  _createInFlight = false;
   stopWheelRenderLoop();
-  stopBackgroundMusic(); // Stop background music when leaving TV mode
+  stopBackgroundMusic();
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (cancelTvDisconnect) { void cancelTvDisconnect(); cancelTvDisconnect = null; }
+  dismissConfirmModals();
+  closeActiveQRCode(false);
   clearSession();
   roomCode = null;
   firebaseSnapshot = {};

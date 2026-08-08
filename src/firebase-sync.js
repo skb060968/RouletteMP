@@ -1,367 +1,604 @@
-/**
- * Roulette MP — Firebase Sync
- *
- * Rooms stored under `roulette-rooms/{roomCode}`.
- * TV is the single writer for game/wheel/players(chips, broke); phones write
- * only their own bets under bets/player_N/{betKey}.
- */
-
-import { db, auth } from './firebase-config.js';
+/** Authenticated, transactional Firebase synchronization for Roulette MP. */
+import { db, auth, authReady } from './firebase-config.js';
 import {
-  ref, set, get, update, remove, onValue, off, onDisconnect,
+  ref, get, onValue, off, onDisconnect, runTransaction,
 } from 'firebase/database';
+import { validateStoredBet } from './bet-validator.js';
+import { resolveRound, STARTING_CHIPS, TOP_UP_AMOUNT } from './game-engine.js';
 
 const ROOM_PATH = 'roulette-rooms';
 const ROOM_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const ROOM_CODE_RETRIES = 20;
+const HISTORY_LIMIT = 10;
+const PLAYER_KEY = /^player_([0-9]|1[01])$/;
 export const MAX_PLAYERS = 12;
-export const STARTING_CHIPS = 1000;
+export { STARTING_CHIPS };
 
-/* ======= SERVER TIME =======
- * Both TV and phones must agree on "now" so the bet timer countdown matches.
- * Local Date.now() can drift between devices by several seconds — using
- * Firebase's .info/serverTimeOffset lets every device compute the same
- * server-time when scheduling/reading betsCloseAt. */
 let _serverTimeOffset = 0;
 let _offsetSubscribed = false;
 function subscribeServerTimeOffset() {
   if (_offsetSubscribed) return;
   _offsetSubscribed = true;
-  try {
-    onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
-      const v = snap.val();
-      if (typeof v === 'number') _serverTimeOffset = v;
-    });
-  } catch (err) {
-    console.warn('serverTimeOffset listener failed:', err.message);
-  }
+  onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
+    if (typeof snap.val() === 'number') _serverTimeOffset = snap.val();
+  }, (err) => console.warn('serverTimeOffset listener failed:', err.message));
 }
 subscribeServerTimeOffset();
 
-/** Returns the current server time in ms (Date.now() + serverTimeOffset).
- *  Use this everywhere the TV and phones must agree on "now". */
 export function serverNow() {
   return Date.now() + _serverTimeOffset;
 }
 
 export async function firebaseRetry(fn, maxRetries = 2, delayMs = 500) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try { return await fn(); }
-    catch (err) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try { return await fn(); } catch (err) {
       if (attempt === maxRetries) throw err;
-      console.warn(`Firebase retry ${attempt + 1}/${maxRetries}:`, err.message);
-      await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
     }
   }
+  throw new Error('Firebase retry exhausted');
+}
+
+async function requireUser() {
+  await authReady;
+  const user = auth.currentUser;
+  if (!user?.uid) throw new Error('Authentication required');
+  return user;
+}
+
+function randomUint32() {
+  const values = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(values);
+  return values[0];
 }
 
 export function generateRoomCode() {
+  if (!globalThis.crypto?.getRandomValues) throw new Error('Secure randomness unavailable');
   let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += ROOM_CODE_CHARSET[Math.floor(Math.random() * ROOM_CODE_CHARSET.length)];
-  }
+  for (let i = 0; i < 4; i += 1) code += ROOM_CODE_CHARSET[randomUint32() % ROOM_CODE_CHARSET.length];
   return code;
 }
 
-/* ======= TV: CREATE ======= */
-export async function createRoomAsTv(hostName, hostEmoji) {
-  const uid = auth.currentUser?.uid || 'anonymous';
-  const roomCode = generateRoomCode();
-  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const data = {
+function randomWinningNumber() {
+  // Rejection sampling avoids modulo bias.
+  const limit = Math.floor(0x100000000 / 37) * 37;
+  let value;
+  do { value = randomUint32(); } while (value >= limit);
+  return value % 37;
+}
+
+function phaseOf(room) {
+  return room?.game?.phase || room?.meta?.status;
+}
+
+function assertHost(room, uid) {
+  return !!room && room.meta?.host?.uid === uid;
+}
+
+function failure(message, code = 'operation-aborted') {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+function expectedMatches(room, expectedRound, expectedRevision) {
+  return room.game?.roundNumber === expectedRound && room.game?.revision === expectedRevision;
+}
+
+async function hostRoomTransaction(roomCode, mutate) {
+  const { uid } = await requireUser();
+  let reason = 'Room no longer exists';
+  const result = await firebaseRetry(() => runTransaction(
+    ref(db, `${ROOM_PATH}/${roomCode}`),
+    (room) => {
+      if (!room) { reason = 'Room no longer exists'; return undefined; }
+      if (!assertHost(room, uid)) { reason = 'Host authority required'; return undefined; }
+      try { return mutate(room); } catch (err) { reason = err.message; return undefined; }
+    },
+    { applyLocally: false },
+  ));
+  if (!result.committed) throw failure(reason);
+  return result.snapshot.val();
+}
+
+function newRoom(hostName, hostEmoji, uid) {
+  const now = serverNow();
+  return {
+    schemaVersion: 2,
     meta: {
       host: { name: hostName, emoji: hostEmoji, uid, connected: true },
-      status: 'lobby',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      status: 'lobby', autoPaused: false, createdAt: now, updatedAt: now,
     },
-    players: {},
-    bets: {},
+    players: {}, bets: {}, payouts: {},
     wheel: { spinning: false, winningNumber: null, spinStartedAt: 0 },
-    game: { roundNumber: 0, betsCloseAt: null, autoCloseSeconds: 30, lastResults: [] },
-    payouts: {},
+    game: {
+      phase: 'lobby', roundNumber: 0, revision: 0, settledRound: -1,
+      lockedBets: {}, winningNumber: null, betsCloseAt: null,
+      autoCloseSeconds: 30, lastResults: [],
+    },
   };
-  await firebaseRetry(() => set(roomRef, data));
-  return { roomCode };
 }
 
-/* ======= PHONE: JOIN ======= */
+export async function createRoomAsTv(hostName, hostEmoji) {
+  const { uid } = await requireUser();
+  for (let attempt = 0; attempt < ROOM_CODE_RETRIES; attempt += 1) {
+    const roomCode = generateRoomCode();
+    const result = await firebaseRetry(() => runTransaction(
+      ref(db, `${ROOM_PATH}/${roomCode}`),
+      (existing) => existing == null ? newRoom(hostName, hostEmoji, uid) : undefined,
+      { applyLocally: false },
+    ));
+    if (result.committed) return { roomCode };
+  }
+  throw failure('Unable to claim a unique room code', 'room-code-collisions');
+}
+
 export async function joinRoomAsPlayer(roomCode, playerName, playerEmoji) {
+  const { uid } = await requireUser();
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const snap = await firebaseRetry(() => get(roomRef));
-  if (!snap.exists()) return { success: false, reason: 'Room not found' };
-  const data = snap.val();
-  if (data.meta?.status === 'ended') return { success: false, reason: 'Room has ended' };
+  const roomSnapshot = await firebaseRetry(() => get(roomRef));
+  const room = roomSnapshot.val();
+  if (!room) return { success: false, reason: 'Room not found' };
+  if (room.schemaVersion !== 2) return { success: false, reason: 'Unsupported room version' };
+  if (phaseOf(room) !== 'lobby') return { success: false, reason: 'Room is not accepting players' };
 
-  const players = data.players || {};
-  // A "ghost" slot is one that has no name (only a leftover `connected:false`
-  // written by a stale onDisconnect handler after the player tapped Leave).
-  // Drop those from the index calculation AND clean them up so the lobby
-  // doesn't show empty cards.
-  const ghostKeys = Object.keys(players).filter((k) => !players[k] || !players[k].name);
-  const validKeys = Object.keys(players).filter((k) => players[k] && players[k].name);
-  const existingIndices = validKeys
-    .map((k) => parseInt(k.replace('player_', ''), 10))
-    .filter((n) => !isNaN(n));
-  if (existingIndices.length >= MAX_PLAYERS) {
-    return { success: false, reason: `Room is full (${MAX_PLAYERS})` };
+  const players = room.players || {};
+  const owned = Object.keys(players)
+    .filter((key) => PLAYER_KEY.test(key) && players[key]?.uid === uid)
+    .sort((a, b) => Number(a.slice(7)) - Number(b.slice(7)));
+  if (owned.length > 1) {
+    return { success: false, reason: 'Duplicate player ownership requires host cleanup' };
   }
-  // Cleanup any ghost slots so they vanish from the lobby. Best-effort:
-  // it's fine if these fail (e.g. permissions), the join itself proceeds.
-  if (ghostKeys.length > 0) {
-    try {
-      const cleanup = {};
-      ghostKeys.forEach((k) => { cleanup[`players/${k}`] = null; });
-      await update(ref(db, `${ROOM_PATH}/${roomCode}`), cleanup);
-    } catch (_) {}
-  }
-  const nextIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
-  const uid = auth.currentUser?.uid || 'anonymous';
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      [`players/player_${nextIndex}`]: {
-        name: playerName, emoji: playerEmoji, uid,
-        connected: true, chips: STARTING_CHIPS, broke: false,
+
+  const claimSlot = async (playerKey, requireOwned) => {
+    const result = await firebaseRetry(() => runTransaction(
+      ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}`),
+      (current) => {
+        if (requireOwned) {
+          if (current?.uid !== uid) return undefined;
+          return { ...current, name: playerName, emoji: playerEmoji, connected: true, uid };
+        }
+        if (current != null) return undefined;
+        return {
+          name: playerName, emoji: playerEmoji, uid, connected: true,
+          chips: STARTING_CHIPS, broke: false,
+        };
       },
-      'meta/updatedAt': Date.now(),
-    })
-  );
-  return { success: true, playerIndex: nextIndex };
+      { applyLocally: false },
+    ));
+    return result.committed;
+  };
+
+  if (owned[0]) {
+    const claimed = await claimSlot(owned[0], true);
+    return claimed
+      ? { success: true, playerIndex: Number(owned[0].slice(7)) }
+      : { success: false, reason: 'Player slot ownership changed' };
+  }
+
+  for (let index = 0; index < MAX_PLAYERS; index += 1) {
+    const playerKey = `player_${index}`;
+    if (players[playerKey]) continue;
+    if (await claimSlot(playerKey, false)) return { success: true, playerIndex: index };
+  }
+  return { success: false, reason: `Room is full (${MAX_PLAYERS})` };
 }
 
-/* ======= REJOIN ======= */
 export async function rejoinRoom(roomCode, playerIndex, role) {
+  const { uid } = await requireUser();
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const snap = await firebaseRetry(() => get(roomRef));
-  if (!snap.exists()) return { success: false, reason: 'Room no longer exists' };
-  const data = snap.val();
+  const snapshot = await firebaseRetry(() => get(roomRef));
+  const room = snapshot.val();
+  if (!room) return { success: false, reason: 'Room no longer exists' };
+  if (room.schemaVersion !== 2) return { success: false, reason: 'Unsupported room version' };
+
   if (role === 'tv') {
-    await firebaseRetry(() =>
-      update(ref(db, `${ROOM_PATH}/${roomCode}/meta/host`), { connected: true })
-    );
-    return { success: true, status: data.meta.status };
+    if (room.meta?.host?.uid !== uid) {
+      return { success: false, reason: 'Host session does not own this room' };
+    }
+    const result = await firebaseRetry(() => runTransaction(roomRef, (current) => {
+      if (!current || current.meta?.host?.uid !== uid) return undefined;
+      current.meta.host.connected = true;
+      current.meta.updatedAt = serverNow();
+      return current;
+    }, { applyLocally: false }));
+    if (!result.committed) return { success: false, reason: 'Host session could not reconnect' };
+    const updated = result.snapshot.val();
+    return { success: true, status: phaseOf(updated), game: updated.game };
   }
+
   const playerKey = `player_${playerIndex}`;
-  if (!data.players || !data.players[playerKey]) {
-    return { success: false, reason: 'Player slot not found' };
+  if (!PLAYER_KEY.test(playerKey) || room.players?.[playerKey]?.uid !== uid) {
+    return { success: false, reason: 'Player session does not own this slot' };
   }
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}`), { connected: true })
-  );
-  return { success: true, status: data.meta.status };
+  const result = await firebaseRetry(() => runTransaction(
+    ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}/connected`),
+    (connected) => connected == null ? undefined : true,
+    { applyLocally: false },
+  ));
+  if (!result.committed) return { success: false, reason: 'Player session could not reconnect' };
+  return { success: true, status: phaseOf(room), game: room.game };
 }
 
-/* ======= LISTEN ======= */
-export function listenRoom(roomCode, callbacks) {
+/** One room listener supplies a coherent snapshot before compatibility callbacks. */
+export function listenRoom(roomCode, callbacks = {}) {
   const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const handler = (snap) => {
-    if (!snap.exists()) {
-      if (callbacks.onRoomDeleted) callbacks.onRoomDeleted();
+  let active = true;
+  let handler = null;
+  authReady.then(() => {
+    if (!active) return;
+    if (!auth.currentUser?.uid) {
+      callbacks.onError?.(failure('Authentication required'));
       return;
     }
-    const data = snap.val();
-    if (callbacks.onMetaChange && data.meta) callbacks.onMetaChange(data.meta);
-    if (callbacks.onPlayersChange) callbacks.onPlayersChange(data.players || {});
-    if (callbacks.onBetsChange) callbacks.onBetsChange(data.bets || {});
-    if (callbacks.onGameChange) callbacks.onGameChange(data.game || {});
-    if (callbacks.onWheelChange) callbacks.onWheelChange(data.wheel || {});
-    if (callbacks.onPayoutsChange) callbacks.onPayoutsChange(data.payouts || {});
+    handler = (snap) => {
+      if (!snap.exists()) { callbacks.onRoomDeleted?.(); return; }
+      const data = snap.val();
+      callbacks.onRoomChange?.(data);
+      callbacks.onMetaChange?.(data.meta || {}, data);
+      callbacks.onPlayersChange?.(data.players || {}, data);
+      callbacks.onBetsChange?.(data.bets || {}, data);
+      callbacks.onGameChange?.(data.game || {}, data);
+      callbacks.onWheelChange?.(data.wheel || {}, data);
+      callbacks.onPayoutsChange?.(data.payouts || {}, data);
+    };
+    onValue(roomRef, handler, (err) => callbacks.onError?.(err));
+  }).catch((err) => callbacks.onError?.(err));
+  return () => {
+    active = false;
+    if (handler) off(roomRef, 'value', handler);
   };
-  onValue(roomRef, handler);
-  return () => off(roomRef, 'value', handler);
 }
 
-/* ======= TV WRITES ======= */
-
-/** Open the betting phase. Phones unlock the felt. */
-export async function openBets(roomCode, autoCloseSeconds = 30) {
-  // Use server-aligned time so phones' countdowns match the TV's regardless
-  // of device clock drift between them.
-  const closesAt = autoCloseSeconds ? serverNow() + autoCloseSeconds * 1000 : null;
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      'meta/status': 'betting',
-      'meta/updatedAt': Date.now(),
-      'game/betsCloseAt': closesAt,
-      'game/autoCloseSeconds': autoCloseSeconds || null,
-      'wheel/winningNumber': null,
-      'wheel/spinning': false,
-      bets: {},
-      payouts: {},
-    })
-  );
-}
-
-/** Close betting (called when timer fires or host taps Spin Now). */
-export async function closeBets(roomCode) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      'meta/status': 'spinning',
-      'meta/updatedAt': Date.now(),
-      'game/betsCloseAt': null,
-      'wheel/spinning': true,
-      'wheel/spinStartedAt': Date.now(),
-    })
-  );
-}
-
-/** Reveal the winning number (after the visual spin completes). */
-export async function revealWinningNumber(roomCode, winningNumber) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}`), {
-      'wheel/winningNumber': winningNumber,
-      'wheel/spinning': false,
-      'meta/status': 'payout',
-      'meta/updatedAt': Date.now(),
-    })
-  );
-}
-
-/**
- * Apply round payouts atomically. Updates every player's chips + broke flags
- * and writes the per-player payout summary.
- *
- * @param {object} updates  e.g. { 'players/player_0/chips': 950, 'payouts/player_0': {...}, ... }
- */
-export async function applyPayouts(roomCode, updates) {
-  const all = { ...updates, 'meta/updatedAt': Date.now() };
-  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), all));
-}
-
-/** Push a number into the lastResults array (capped at last 10).
- *  roundNumber is passed in explicitly so it keeps incrementing past 10
- *  even though lastResults is capped. */
-export async function pushResult(roomCode, winningNumber, currentResults, currentRoundNumber) {
-  const next = [...(currentResults || []), winningNumber].slice(-10);
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/game`), {
-      lastResults: next,
-      roundNumber: (currentRoundNumber || 0) + 1,
-    })
-  );
-}
-
-/** Apply a chips/broke update to many players in one write. */
-export async function applyBalanceUpdates(roomCode, newBalances, newBroke) {
-  const updates = {};
-  Object.keys(newBalances).forEach((key) => {
-    updates[`players/${key}/chips`] = newBalances[key];
-    updates[`players/${key}/broke`] = !!newBroke[key];
+export async function openBets(roomCode, autoCloseSeconds = 30, expected = {}) {
+  const seconds = Number.isFinite(autoCloseSeconds) && autoCloseSeconds > 0 ? autoCloseSeconds : null;
+  const room = await hostRoomTransaction(roomCode, (current) => {
+    const phase = phaseOf(current);
+    if (phase !== 'lobby' && phase !== 'payout') throw failure('Bets cannot open in the current phase');
+    if (expected.revision != null && current.game?.revision !== expected.revision) throw failure('Stale host state');
+    const now = serverNow();
+    const revision = (current.game?.revision || 0) + 1;
+    const roundNumber = (current.game?.roundNumber || 0) + 1;
+    current.meta.status = 'betting';
+    current.meta.updatedAt = now;
+    current.game = {
+      ...current.game, phase: 'betting', roundNumber, revision,
+      lockedBets: {}, winningNumber: null,
+      betsCloseAt: seconds ? now + seconds * 1000 : null,
+      autoCloseSeconds: seconds,
+    };
+    current.wheel = { spinning: false, winningNumber: null, spinStartedAt: 0 };
+    current.bets = {};
+    current.payouts = {};
+    return current;
   });
-  updates['meta/updatedAt'] = Date.now();
-  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), updates));
+  return room.game;
 }
 
-export async function endGame(roomCode) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
-      status: 'ended', updatedAt: Date.now(),
-    })
-  );
-}
-
-/**
- * Toggles or sets the autoPaused flag.
- * When true, the TV won't automatically start the next round after payout.
- */
-export async function setPaused(roomCode, paused) {
-  await firebaseRetry(() =>
-    update(ref(db, `${ROOM_PATH}/${roomCode}/meta`), {
-      autoPaused: paused,
-      updatedAt: Date.now(),
-    })
-  );
-}
-
-/**
- * Removes all disconnected players from the room.
- * Cleans up ghost players and players who have lost connection.
- */
-export async function removeDisconnectedPlayers(roomCode) {
-  const roomRef = ref(db, `${ROOM_PATH}/${roomCode}`);
-  const snap = await firebaseRetry(() => get(roomRef));
-  if (!snap.exists()) return { removed: 0 };
-  
-  const data = snap.val();
-  const players = data.players || {};
-  
-  // Find all players that are disconnected or ghost (no name)
-  const toRemove = Object.keys(players).filter((k) => {
-    const p = players[k];
-    return !p || !p.name || p.connected === false;
+export async function closeBets(roomCode, expectedRound, expectedRevision) {
+  const winningNumber = randomWinningNumber();
+  const room = await hostRoomTransaction(roomCode, (current) => {
+    const phase = phaseOf(current);
+    if (phase === 'spinning' && current.game?.roundNumber === expectedRound &&
+        current.game?.revision === expectedRevision + 1 &&
+        Number.isSafeInteger(current.game?.winningNumber)) {
+      return current; // Idempotent retry after a lost response.
+    }
+    if (phase !== 'betting' || !expectedMatches(current, expectedRound, expectedRevision)) {
+      throw failure('Bet close was stale or out of phase');
+    }
+    const authority = { roundNumber: expectedRound, revision: expectedRevision };
+    // Validate and normalize the live book before locking it. Rules enforce
+    // each payload; this final host boundary drops aggregate overcommitment.
+    const preview = resolveRound(
+      current.bets || {}, current.players || {}, winningNumber, authority,
+    );
+    const now = serverNow();
+    current.game.phase = 'spinning';
+    current.game.revision = expectedRevision + 1;
+    current.game.betsCloseAt = null;
+    current.bets = preview.acceptedBets;
+    current.game.lockedBets = preview.acceptedBets;
+    current.game.winningNumber = winningNumber;
+    current.meta.status = 'spinning';
+    current.meta.updatedAt = now;
+    current.wheel = { spinning: true, winningNumber, spinStartedAt: now };
+    return current;
   });
-  
-  if (toRemove.length === 0) return { removed: 0 };
-  
-  // Build cleanup update
-  const cleanup = {};
-  toRemove.forEach((k) => {
-    cleanup[`players/${k}`] = null;
-    // Also clean up their bets if any
-    cleanup[`bets/${k}`] = null;
+  return {
+    winningNumber: room.game.winningNumber,
+    roundNumber: room.game.roundNumber,
+    revision: room.game.revision,
+  };
+}
+
+export async function settleRound(roomCode, expectedRound, expectedRevision) {
+  const room = await hostRoomTransaction(roomCode, (current) => {
+    if (phaseOf(current) === 'payout' && current.game?.settledRound === expectedRound &&
+        current.game?.revision === expectedRevision + 1) {
+      return current;
+    }
+    if (phaseOf(current) !== 'spinning' || !expectedMatches(current, expectedRound, expectedRevision)) {
+      throw failure('Settlement was stale or out of phase');
+    }
+    const winningNumber = current.game?.winningNumber;
+    if (!Number.isSafeInteger(winningNumber) || winningNumber < 0 || winningNumber > 36) {
+      throw failure('Persisted winning number is invalid');
+    }
+    const bettingAuthority = { roundNumber: expectedRound, revision: expectedRevision - 1 };
+    const resolution = resolveRound(
+      current.game.lockedBets || {}, current.players || {}, winningNumber, bettingAuthority,
+    );
+    const settlementRevision = expectedRevision + 1;
+    for (const key of Object.keys(resolution.newBalances)) {
+      current.players[key].chips = resolution.newBalances[key];
+      current.players[key].broke = resolution.newBroke[key];
+      resolution.payouts[key].roundNumber = expectedRound;
+      resolution.payouts[key].revision = settlementRevision;
+    }
+    current.payouts = resolution.payouts;
+    current.game.phase = 'payout';
+    current.game.revision = settlementRevision;
+    current.game.settledRound = expectedRound;
+    current.game.lastResults = [...(current.game.lastResults || []), winningNumber].slice(-HISTORY_LIMIT);
+    current.meta.status = 'payout';
+    current.meta.updatedAt = serverNow();
+    current.wheel = { ...current.wheel, spinning: false, winningNumber };
+    return current;
   });
-  cleanup['meta/updatedAt'] = Date.now();
-  
-  await firebaseRetry(() => update(ref(db, `${ROOM_PATH}/${roomCode}`), cleanup));
-  
-  return { removed: toRemove.length, players: toRemove };
+  return room;
 }
 
-export async function deleteRoom(roomCode) {
-  await firebaseRetry(() => remove(ref(db, `${ROOM_PATH}/${roomCode}`)));
+function requireSafeHostMaintenancePhase(room, expected = {}) {
+  const phase = phaseOf(room);
+  if (phase !== 'lobby' && phase !== 'payout') throw failure('Action is not allowed during this phase');
+  if (expected.revision != null && room.game?.revision !== expected.revision) throw failure('Stale host state');
 }
 
-/* ======= PHONE WRITES ======= */
+export async function topUpPlayers(roomCode, expected = {}) {
+  return hostRoomTransaction(roomCode, (room) => {
+    requireSafeHostMaintenancePhase(room, expected);
+    Object.values(room.players || {}).forEach((player) => {
+      if (player && (player.broke || player.chips === 0)) {
+        player.chips = TOP_UP_AMOUNT;
+        player.broke = false;
+      }
+    });
+    room.meta.updatedAt = serverNow();
+    return room;
+  });
+}
 
-/**
- * Set (or replace) a single bet entry under bets/player_N/{betKey}.
- * Pass chips=0 to remove (Firebase removes null/0 leaves cleanly via remove).
- */
-export async function writeBet(roomCode, playerIndex, betKey, payload) {
-  const path = `${ROOM_PATH}/${roomCode}/bets/player_${playerIndex}/${betKey}`;
-  if (!payload || payload.chips <= 0) {
-    await firebaseRetry(() => remove(ref(db, path)));
-  } else {
-    await firebaseRetry(() => set(ref(db, path), payload));
+export async function resetPlayerBalances(roomCode, expected = {}) {
+  return hostRoomTransaction(roomCode, (room) => {
+    requireSafeHostMaintenancePhase(room, expected);
+    Object.values(room.players || {}).forEach((player) => {
+      if (player) { player.chips = STARTING_CHIPS; player.broke = false; }
+    });
+    room.meta.updatedAt = serverNow();
+    return room;
+  });
+}
+
+export async function setPaused(roomCode, paused, expected = {}) {
+  return hostRoomTransaction(roomCode, (room) => {
+    if (phaseOf(room) === 'ended') throw failure('Room has ended');
+    if (expected.phase && phaseOf(room) !== expected.phase) throw failure('Stale host phase');
+    if (expected.revision != null && room.game?.revision !== expected.revision) throw failure('Stale host state');
+    room.meta.autoPaused = !!paused;
+    room.meta.updatedAt = serverNow();
+    return room;
+  });
+}
+
+export async function removeDisconnectedPlayers(roomCode, expected = {}) {
+  let removed = [];
+  await hostRoomTransaction(roomCode, (room) => {
+    const phase = phaseOf(room);
+    if (phase !== 'lobby' && phase !== 'payout') {
+      throw failure('Disconnected players cannot be removed during this phase');
+    }
+    if (expected.revision != null && room.game?.revision !== expected.revision) throw failure('Stale host state');
+    removed = Object.keys(room.players || {}).filter((key) => {
+      const player = room.players[key];
+      return !player || !player.name || player.connected === false;
+    });
+    for (const key of removed) {
+      delete room.players[key];
+      if (room.bets) delete room.bets[key];
+    }
+    room.meta.updatedAt = serverNow();
+    return room;
+  });
+  return { removed: removed.length, players: removed };
+}
+
+export async function removePlayer(roomCode, playerIndex, expected = {}) {
+  const key = `player_${playerIndex}`;
+  if (!PLAYER_KEY.test(key)) throw failure('Invalid player slot');
+  return hostRoomTransaction(roomCode, (room) => {
+    if (phaseOf(room) !== 'lobby') throw failure('Players can only be removed in the lobby');
+    if (expected.revision != null && room.game?.revision !== expected.revision) throw failure('Stale host state');
+    delete room.players?.[key];
+    delete room.bets?.[key];
+    room.meta.updatedAt = serverNow();
+    return room;
+  });
+}
+
+async function playerBetTransaction(roomCode, playerIndex, authority, mutate) {
+  const { uid } = await requireUser();
+  const playerKey = `player_${playerIndex}`;
+  if (!PLAYER_KEY.test(playerKey)) throw failure('Invalid player slot');
+
+  const roomSnapshot = await firebaseRetry(() => get(ref(db, `${ROOM_PATH}/${roomCode}`)));
+  const room = roomSnapshot.val();
+  if (!room) throw failure('Room no longer exists', 'bet-rejected');
+  if (phaseOf(room) !== 'betting' || !expectedMatches(room, authority?.roundNumber, authority?.revision)) {
+    throw failure('Betting authority expired', 'bet-rejected');
   }
+  const player = room.players?.[playerKey];
+  if (player?.uid !== uid) throw failure('Player slot ownership failed', 'bet-rejected');
+  if (!Number.isSafeInteger(player.chips) || player.chips < 0) {
+    throw failure('Player balance is invalid', 'bet-rejected');
+  }
+
+  let reason = 'Bet rejected';
+  const result = await firebaseRetry(() => runTransaction(
+    ref(db, `${ROOM_PATH}/${roomCode}/bets/${playerKey}`),
+    (currentBook) => {
+      try { return mutate(currentBook || {}, player.chips); }
+      catch (err) { reason = err.message; return undefined; }
+    },
+    { applyLocally: false },
+  ));
+  if (!result.committed) throw failure(reason, 'bet-rejected');
+  return { playerBets: result.snapshot.val() || {}, game: room.game };
 }
 
-/** Wipe all bets for one player (the "Clear" button). */
-export async function clearPlayerBets(roomCode, playerIndex) {
-  await firebaseRetry(() =>
-    remove(ref(db, `${ROOM_PATH}/${roomCode}/bets/player_${playerIndex}`))
-  );
+export async function writeBet(roomCode, playerIndex, key, payload, authority) {
+  return playerBetTransaction(roomCode, playerIndex, authority, (book, balance) => {
+    const nextBook = { ...book };
+    if (!payload || payload.chips === 0) {
+      delete nextBook[key];
+    } else {
+      const stored = {
+        type: payload.type,
+        target: payload.target ?? null,
+        chips: payload.chips,
+        roundNumber: authority.roundNumber,
+        revision: authority.revision,
+      };
+      if (!validateStoredBet(key, stored, authority)) throw failure('Malformed bet');
+      nextBook[key] = stored;
+    }
+    let total = 0;
+    for (const [storedKey, storedBet] of Object.entries(nextBook)) {
+      if (!validateStoredBet(storedKey, storedBet, authority)) throw failure('Malformed bet book');
+      total += storedBet.chips;
+      if (!Number.isSafeInteger(total)) throw failure('Unsafe aggregate bet value');
+    }
+    if (total > balance) throw failure('Aggregate bets exceed balance');
+    return Object.keys(nextBook).length ? nextBook : null;
+  });
+}
+
+export async function clearPlayerBets(roomCode, playerIndex, authority) {
+  return playerBetTransaction(roomCode, playerIndex, authority, (book) => {
+    for (const [storedKey, storedBet] of Object.entries(book)) {
+      if (!validateStoredBet(storedKey, storedBet, authority)) {
+        throw failure('Betting authority expired');
+      }
+    }
+    return null;
+  });
 }
 
 export async function leaveRoom(roomCode, playerIndex) {
-  // Cancel the queued onDisconnect first. Otherwise, after we remove the
-  // player node, the disconnect handler still fires when the page closes
-  // and writes `connected: false` to players/player_N/connected — Firebase
-  // recreates a ghost player (no name, no chips) at that slot, and the
-  // next join takes player_N+1, so the lobby shows two cards for one user.
-  const connectedRef = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
-  try { await onDisconnect(connectedRef).cancel(); } catch (_) {}
-  await firebaseRetry(() =>
-    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
-  );
+  const { uid } = await requireUser();
+  const playerKey = `player_${playerIndex}`;
+  if (!PLAYER_KEY.test(playerKey)) throw failure('Invalid player slot');
+  const playerRef = ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}`);
+  const playerSnapshot = await firebaseRetry(() => get(playerRef));
+  if (!playerSnapshot.exists()) return;
+  if (playerSnapshot.val()?.uid !== uid) throw failure('Player slot ownership failed');
+
+  try {
+    const betRef = ref(db, `${ROOM_PATH}/${roomCode}/bets/${playerKey}`);
+    const betSnapshot = await firebaseRetry(() => get(betRef));
+    if (betSnapshot.exists()) {
+      const betResult = await firebaseRetry(() => runTransaction(
+        betRef, () => null, { applyLocally: false },
+      ));
+      if (!betResult.committed) throw failure('Bet cleanup was not committed');
+    }
+
+    const result = await firebaseRetry(() => runTransaction(
+      playerRef,
+      (player) => player?.uid === uid ? null : undefined,
+      { applyLocally: false },
+    ));
+    if (!result.committed) throw failure('Player slot ownership failed');
+  } catch (error) {
+    try {
+      await runTransaction(
+        ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}/connected`),
+        (connected) => connected == null ? undefined : false,
+        { applyLocally: false },
+      );
+    } catch (_) {}
+    throw error;
+  }
 }
 
-/**
- * Host removes a player from the lobby (kick).
- * Similar to leaveRoom but can be called by the host on any player.
- */
-export async function removePlayer(roomCode, playerIndex) {
-  await firebaseRetry(() =>
-    remove(ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`))
-  );
+export async function deleteRoom(roomCode) {
+  const { uid } = await requireUser();
+  let reason = 'Room no longer exists';
+  const result = await firebaseRetry(() => runTransaction(
+    ref(db, `${ROOM_PATH}/${roomCode}`),
+    (room) => {
+      if (!room) return null;
+      if (!assertHost(room, uid)) { reason = 'Host authority required'; return undefined; }
+      return null;
+    },
+    { applyLocally: false },
+  ));
+  if (!result.committed) throw failure(reason);
 }
 
-/* ======= DISCONNECT HOOKS ======= */
+export async function endGame(roomCode, expected = {}) {
+  return hostRoomTransaction(roomCode, (room) => {
+    if (expected.revision != null && room.game?.revision !== expected.revision) throw failure('Stale host state');
+    room.meta.status = 'ended';
+    room.meta.updatedAt = serverNow();
+    room.game.phase = 'ended';
+    room.game.revision = (room.game.revision || 0) + 1;
+    room.game.betsCloseAt = null;
+    return room;
+  });
+}
+
+function setupDisconnect(path, ownershipCheck, label) {
+  let registration = null;
+  const registered = (async () => {
+    const { uid } = await requireUser();
+    const snapshot = await get(ref(db, path.replace(/\/connected$/, '')));
+    if (!ownershipCheck(snapshot.val(), uid)) throw failure(`${label} ownership failed`);
+    registration = onDisconnect(ref(db, path));
+    await registration.set(false);
+  })();
+  registered.catch((err) => console.warn(`${label} onDisconnect failed:`, err.message));
+  return async () => {
+    try { await registered; } catch (_) { return; }
+    if (registration) {
+      try { await registration.cancel(); } catch (_) {}
+    }
+  };
+}
+
 export function setupTvDisconnectHandler(roomCode) {
-  const r = ref(db, `${ROOM_PATH}/${roomCode}/meta/host/connected`);
-  onDisconnect(r).set(false).catch((err) => console.warn('TV onDisconnect failed:', err.message));
+  return setupDisconnect(
+    `${ROOM_PATH}/${roomCode}/meta/host/connected`,
+    (host, uid) => host?.uid === uid,
+    'TV',
+  );
 }
 
 export function setupPlayerDisconnectHandler(roomCode, playerIndex) {
-  const r = ref(db, `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}/connected`);
-  onDisconnect(r).set(false).catch((err) => console.warn('Player onDisconnect failed:', err.message));
+  const playerPath = `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`;
+  let registration = null;
+  const registered = (async () => {
+    const { uid } = await requireUser();
+    const snapshot = await get(ref(db, playerPath));
+    if (snapshot.val()?.uid !== uid) throw failure('Player slot ownership failed');
+    registration = onDisconnect(ref(db, `${playerPath}/connected`));
+    await registration.set(false);
+  })();
+  registered.catch((err) => console.warn('Player onDisconnect failed:', err.message));
+  return async () => {
+    try { await registered; } catch (_) { return; }
+    if (registration) {
+      try { await registration.cancel(); } catch (_) {}
+    }
+  };
 }
