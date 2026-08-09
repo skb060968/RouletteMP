@@ -132,13 +132,12 @@
       </header>
       <div id="phone-bet-board" class="phone-bet-board" role="group" aria-label="Betting felt"></div>
       <div id="phone-result-panel" class="phone-result-panel" role="status" aria-live="polite" aria-label="Round results" hidden></div>
-      <div class="phone-chip-row" role="group" aria-label="Chip denominations">
-        <button class="chip-btn" type="button" data-denom="1" aria-pressed="false">1</button>
-        <button class="chip-btn" type="button" data-denom="5" aria-pressed="false">5</button>
-        <button class="chip-btn selected" type="button" data-denom="25" aria-pressed="true">25</button>
-        <button class="chip-btn" type="button" data-denom="100" aria-pressed="false">100</button>
-        <button id="btn-phone-clear-bets" class="chip-btn clear" type="button">Clear</button>
+      <div class="phone-bet-actions" role="group" aria-label="Draft bet controls">
+        <span class="bet-increment-indicator" aria-label="Each board tap adds 100 chips">+100 per tap</span>
+        <button id="btn-phone-clear-bets" class="bet-action-btn clear" type="button">Clear</button>
+        <button id="btn-phone-confirm-bets" class="bet-action-btn confirm" type="button">Confirm Bets</button>
       </div>
+      <p id="phone-bet-status" class="phone-bet-status draft" role="status" aria-live="polite">Draft not submitted</p>
       <div class="phone-tray-row">
         <span id="phone-bet-tray" class="phone-bet-tray" aria-live="polite">Bet: 0 · Balance: 1000</span>
         <button id="btn-phone-game-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
@@ -164,11 +163,11 @@
           <section class="help-section">
             <h3>📱 How to Bet</h3>
             <ol class="help-instructions">
-              <li>Select a chip value (1, 5, 25, or 100)</li>
-              <li>Tap on the betting board to place your bet</li>
-              <li>Tap multiple times to add more chips to the same bet</li>
-              <li>Use “Clear” to remove all your bets</li>
-              <li>Wait for the wheel to spin and see if you win!</li>
+              <li>Each tap on the betting board adds exactly 100 chips to your local draft</li>
+              <li>Tap the same cell repeatedly to build 100, 200, 300, and more</li>
+              <li>Use “Clear” to empty the local draft before submitting</li>
+              <li>Select “Confirm Bets” once to submit the entire draft</li>
+              <li>Only confirmed bets reach the table and count when the wheel spins</li>
             </ol>
           </section>
           <section class="help-section">

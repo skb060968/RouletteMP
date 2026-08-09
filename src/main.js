@@ -41,9 +41,6 @@ function syncPressedStates(root = document) {
   root.querySelectorAll?.('.emoji-btn').forEach((button) => {
     button.setAttribute('aria-pressed', button.classList.contains('selected') ? 'true' : 'false');
   });
-  root.querySelectorAll?.('.chip-btn[data-denom]').forEach((button) => {
-    button.setAttribute('aria-pressed', button.classList.contains('selected') ? 'true' : 'false');
-  });
   root.querySelectorAll?.('[id*="mute"].icon-btn').forEach((button) => {
     const muted = button.textContent.includes('🔇');
     button.setAttribute('aria-pressed', muted ? 'true' : 'false');

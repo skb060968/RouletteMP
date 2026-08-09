@@ -3,23 +3,24 @@
  *
  * Player flow: home → phone-join → phone-lobby → phone-bet → phone-spin → phone-result
  *
- * The phone writes only its own bets (debounced ~200ms) and reads everything
- * else from Firebase.
+ * Phone bets stay in memory as a local draft until the player explicitly
+ * confirms the complete book in one Firebase transaction.
  */
 
 import {
   joinRoomAsPlayer, listenRoom, setupPlayerDisconnectHandler,
-  writeBet, clearPlayerBets, leaveRoom, rejoinRoom,
+  replacePlayerBets, leaveRoom, rejoinRoom,
   serverNow, MAX_PLAYERS,
 } from './firebase-sync.js';
-import { BET_TYPES, betKey, payoutMultiplier, resolveBets } from './bet-validator.js';
+import {
+  BET_INCREMENT, MAX_BET_CHIPS, BET_TYPES, betKey, payoutMultiplier, resolveBets,
+} from './bet-validator.js';
 import { colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, dismissConfirmModals } from './platform-ui.js';
 import { ROOM_CODE_PATTERN } from './deep-link-handler.js';
 
 const SESSION_KEY = 'roulette_mp_session';
-const CHIP_DENOMINATIONS = [1, 5, 25, 100];
 
 let roomCode = null;
 let playerIndex = null;
@@ -27,28 +28,23 @@ let unsubscribe = null;
 let cancelPlayerDisconnect = null;
 let firebaseSnapshot = {};
 let previousPlayers = {};
-let selectedDenom = 25;
 let activeBetAuthority = null;
 let lastPhaseKey = null;
 let lastRoundKey = null;
 let shownPayoutKey = null;
 let _joinInFlight = false;
-/** Local pending bets — keyed by betKey, value is the chip count. Mirrors
- *  what's written to Firebase but allows instant UI feedback before round-trip. */
-let localBets = {};
-/** Snapshot of bets taken at spin time so the result panel can keep showing
- *  what the player wagered even after lobby/round reset wipes localBets. */
+/** Server-confirmed book for the active round. */
+let committedBets = {};
+/** In-memory-only editable book. It is never persisted until confirmation. */
+let draftBets = {};
+let draftDirty = false;
+let betsConfirmed = false;
+let submitInFlight = false;
+let submitError = '';
+let draftGeneration = 0;
+/** Snapshot of bets taken at spin time so the result panel remains stable. */
 let lastRoundBets = {};
-/** Snapshot of full bet objects {type, target, chips} so we can reuse the
- *  bet-validator's resolveBets() to compute per-bet outcome on the phone. */
 let lastRoundBetObjects = [];
-/** Debounced bet-write timers keyed by betKey. */
-const _betWriteTimers = new Map();
-/** Firebase bet mutations are serialized so an older absolute write cannot win last. */
-let _betWriteChain = Promise.resolve();
-let _betWriteGeneration = 0;
-const _pendingBetWrites = new Map();
-let _clearWritePending = 0;
 
 /* ======= SESSION ======= */
 function saveSession() {
@@ -158,22 +154,18 @@ function attachRoomListener() {
       const game = firebaseSnapshot.game || {};
       const status = game.phase || meta.status;
       const phaseKey = `${status}:${game.roundNumber ?? -1}:${game.revision ?? -1}`;
-      if (status !== 'betting') {
-        cancelPendingBetWrites();
-        activeBetAuthority = null;
-      }
       if (phaseKey === lastPhaseKey) return;
       lastPhaseKey = phaseKey;
 
       if (status === 'lobby') {
-        localBets = {};
+        discardDraftState();
         lastRoundBets = {};
         lastRoundBetObjects = [];
         showScreen('phone-lobby');
         renderPhoneLobby();
       } else if (status === 'betting') {
         activeBetAuthority = { roundNumber: game.roundNumber, revision: game.revision };
-        localBets = {};
+        initializeBettingBook((firebaseSnapshot.bets || {})[`player_${playerIndex}`] || {});
         lastRoundBets = {};
         lastRoundBetObjects = [];
         lastRoundKey = null;
@@ -183,15 +175,18 @@ function attachRoomListener() {
         renderHeader();
         startCountdownDisplay();
       } else if (status === 'spinning') {
+        discardDraftState();
         snapshotLastRoundBets();
         renderHeader();
         renderBetBoard();
         renderResultPanel();
       } else if (status === 'payout') {
+        discardDraftState();
         renderHeader();
         renderBetBoard();
         renderResultPanel();
       } else if (status === 'ended') {
+        discardDraftState();
         showToast('Host closed the room.');
         cleanupAndGoHome();
       }
@@ -206,9 +201,7 @@ function attachRoomListener() {
         cleanupAndGoHome();
         return;
       }
-      
-      // Fix: If player was broke and now has chips during payout phase,
-      // clear result screen so they can see the bet board (disabled until betting opens)
+
       const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
       const me = players?.[myKey];
       const oldMe = oldPlayers?.[myKey];
@@ -216,38 +209,27 @@ function attachRoomListener() {
         const wasBroke = oldMe.broke || (oldMe.chips ?? 0) <= 0;
         const nowHasChips = !me.broke && (me.chips ?? 0) > 0;
         if (wasBroke && nowHasChips) {
-          // Player received bonus/reset — clear result screen state
           lastRoundBets = {};
           lastRoundBetObjects = [];
           showToast(`💰 Received ${me.chips} chips!`, 2000);
-          renderResultPanel(); // Will hide result panel and show bet board
+          renderResultPanel();
         }
       }
-      
+
       renderPhoneLobby();
       renderHeader();
       renderBetBoard();
     },
     onBetsChange: (bets) => {
       firebaseSnapshot.bets = bets;
-      // Sync local bets from Firebase if a round just opened (localBets may
-      // have stale entries from previous round during a refresh).
-      const myKey = `player_${playerIndex}`;
-      const myBets = (bets && bets[myKey]) || {};
-      // Merge: prefer local pending writes if present, else use server.
-      const merged = {};
-      if (_clearWritePending === 0) {
-        Object.keys(myBets).forEach((key) => {
-          merged[key] = myBets[key]?.chips || 0;
-        });
-      }
-      // Preserve only optimistic values that still have a timer or serialized
-      // Firebase mutation pending; all other values follow server truth.
-      Object.entries(localBets).forEach(([key, chips]) => {
-        if (chips > 0 && isBetWritePending(key)) merged[key] = chips;
-      });
       if (firebaseSnapshot.game?.phase === 'betting') {
-        localBets = merged;
+        const serverBook = normalizeBetBook((bets || {})[`player_${playerIndex}`] || {});
+        committedBets = serverBook;
+        // A snapshot may refresh committed truth, but never clobbers an edited draft.
+        if (!draftDirty && !submitInFlight) {
+          draftBets = cloneBetBook(serverBook);
+          betsConfirmed = Object.keys(serverBook).length > 0;
+        }
       }
       renderBetBoard();
     },
@@ -259,6 +241,7 @@ function attachRoomListener() {
     onGameChange: (game) => {
       firebaseSnapshot.game = game;
       renderHeader();
+      renderBetBoard();
     },
     onPayoutsChange: (payouts) => {
       firebaseSnapshot.payouts = payouts;
@@ -360,45 +343,51 @@ function wirePhoneGame() {
     });
   }
   const clearBtn = document.getElementById('btn-phone-clear-bets');
-  if (clearBtn) clearBtn.addEventListener('click', async () => {
-    if ((firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status) !== 'betting' || !activeBetAuthority) return;
-    const authority = { ...activeBetAuthority };
-    const targetRoom = roomCode;
-    const targetPlayer = playerIndex;
-    clearBetWriteTimers();
-    localBets = {};
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (!canEditDraft()) return;
+    draftBets = {};
+    draftDirty = !betBooksEqual(draftBets, committedBets);
+    submitError = '';
     renderBetBoard();
-    if (targetRoom == null || targetPlayer == null) return;
-    try {
-      await enqueueBetMutation(null, async () => {
-        const result = await clearPlayerBets(targetRoom, targetPlayer, authority);
-        if (activeBetAuthority?.roundNumber === authority.roundNumber &&
-            activeBetAuthority?.revision === authority.revision) {
-          reconcileLocalBets(result.playerBets, true);
-        }
-      });
-    } catch (_) {
-      const stillCurrent = activeBetAuthority?.roundNumber === authority.roundNumber &&
-        activeBetAuthority?.revision === authority.revision;
-      if (!stillCurrent) return;
-      reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {}, true);
-      showToast('Bets changed before they could be cleared.');
-    }
   });
 
-  document.querySelectorAll('.chip-btn[data-denom]').forEach((btn) => {
-    btn.addEventListener('click', () => selectChipDenomination(Number(btn.dataset.denom)));
+  const confirmBtn = document.getElementById('btn-phone-confirm-bets');
+  if (confirmBtn) confirmBtn.addEventListener('click', () => {
+    void confirmDraftBets();
   });
 }
 
-function selectChipDenomination(value) {
-  if (!CHIP_DENOMINATIONS.includes(value)) return;
-  selectedDenom = value;
-  document.querySelectorAll('.chip-btn[data-denom]').forEach((button) => {
-    const selected = Number(button.dataset.denom) === value;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  });
+async function confirmDraftBets() {
+  if (!canConfirmDraft()) return;
+  const authority = { ...activeBetAuthority };
+  const targetRoom = roomCode;
+  const targetPlayer = playerIndex;
+  const submittedDraft = cloneBetBook(draftBets);
+  const generation = draftGeneration;
+
+  submitInFlight = true;
+  submitError = '';
+  renderBetBoard();
+  try {
+    const result = await replacePlayerBets(
+      targetRoom, targetPlayer, submittedDraft, authority,
+    );
+    if (generation !== draftGeneration || !authorityMatches(authority)) return;
+    committedBets = normalizeBetBook(result.playerBets);
+    draftBets = cloneBetBook(committedBets);
+    draftDirty = false;
+    betsConfirmed = true;
+    playSound('chip', 0.6);
+  } catch (err) {
+    if (generation !== draftGeneration || !authorityMatches(authority)) return;
+    submitError = bettingIsOpen() ? 'Failed — check connection and try again' : 'Failed/closed — draft not submitted';
+    console.warn('replacePlayerBets rejected:', err.message);
+  } finally {
+    if (generation === draftGeneration) {
+      submitInFlight = false;
+      renderBetBoard();
+    }
+  }
 }
 
 /**
@@ -462,42 +451,48 @@ function buildBetBoard() {
 }
 
 function onBetCellTap(cell) {
-  const game = firebaseSnapshot.game || {};
-  if (game.phase !== 'betting' || !activeBetAuthority ||
-      game.roundNumber !== activeBetAuthority.roundNumber || game.revision !== activeBetAuthority.revision) return;
+  if (!canEditDraft()) return;
   const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
-  if (!me || me.broke || (me.chips ?? 0) <= 0) return;
-
   const type = cell.dataset.betType;
   const targetRaw = cell.dataset.betTarget;
   const target = targetRaw == null || targetRaw === '' ? null : parseInt(targetRaw, 10);
   const key = betKey(type, target);
   if (!key) return;
-  const denom = CHIP_DENOMINATIONS.includes(selectedDenom) ? selectedDenom : 0;
-  if (!denom) return;
 
-  // Check we're not over-betting
-  const currentTotal = totalLocal();
-  if (currentTotal + denom > (Number(me.chips) || 0)) {
+  const current = draftBets[key];
+  if ((current?.chips || 0) + BET_INCREMENT > MAX_BET_CHIPS) {
+    showToast(`Maximum ${MAX_BET_CHIPS} chips per bet`);
+    playSound('error', 0.4);
+    return;
+  }
+  const currentTotal = totalDraft();
+  if (currentTotal + BET_INCREMENT > (Number(me?.chips) || 0)) {
     showToast('Not enough chips for that bet');
     playSound('error', 0.4);
     if (navigator.vibrate) try { navigator.vibrate(40); } catch (_) {}
     return;
   }
 
-  localBets[key] = (localBets[key] || 0) + denom;
+  draftBets[key] = {
+    type,
+    target,
+    chips: (current?.chips || 0) + BET_INCREMENT,
+  };
+  draftDirty = !betBooksEqual(draftBets, committedBets);
+  submitError = '';
   playSound('chip', 0.5);
-  // Subtle haptic + press-in animation for tactile feedback.
   if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {}
   cell.classList.remove('press');
   void cell.offsetWidth;
   cell.classList.add('press');
   renderBetBoard();
-  scheduleBetWrite(key, type, target);
 }
 
-function totalLocal() {
-  return Object.values(localBets).reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
+function totalDraft() {
+  return Object.values(draftBets).reduce((sum, bet) => {
+    const chips = bet?.chips;
+    return sum + (Number.isSafeInteger(chips) ? chips : 0);
+  }, 0);
 }
 
 /** Phone-side confetti for the winner. Bursts colors matching the winning
@@ -519,101 +514,81 @@ function burstPhoneConfetti() {
   } catch (_) {}
 }
 
-function clearBetWriteTimers() {
-  _betWriteTimers.forEach((timer) => clearTimeout(timer));
-  _betWriteTimers.clear();
+function normalizeBetBook(book) {
+  const normalized = {};
+  Object.entries(book || {}).forEach(([key, bet]) => {
+    if (!bet || betKey(bet.type, bet.target ?? null) !== key ||
+        !Number.isSafeInteger(bet.chips) || bet.chips <= 0 ||
+        bet.chips % BET_INCREMENT !== 0) return;
+    normalized[key] = {
+      type: bet.type,
+      target: bet.target ?? null,
+      chips: bet.chips,
+      ...(Number.isSafeInteger(bet.roundNumber) ? { roundNumber: bet.roundNumber } : {}),
+      ...(Number.isSafeInteger(bet.revision) ? { revision: bet.revision } : {}),
+    };
+  });
+  return normalized;
 }
 
-function cancelPendingBetWrites() {
-  clearBetWriteTimers();
-  _betWriteGeneration += 1;
-  _pendingBetWrites.clear();
-  _clearWritePending = 0;
+function cloneBetBook(book) {
+  return Object.fromEntries(Object.entries(book || {}).map(([key, bet]) => [key, { ...bet }]));
 }
 
-function isBetWritePending(key) {
-  return _betWriteTimers.has(key) || (_pendingBetWrites.get(key) || 0) > 0;
-}
-
-function enqueueBetMutation(key, operation) {
-  const generation = _betWriteGeneration;
-  if (key == null) {
-    _clearWritePending += 1;
-  } else {
-    _pendingBetWrites.set(key, (_pendingBetWrites.get(key) || 0) + 1);
-  }
-
-  const run = () => generation === _betWriteGeneration ? operation() : undefined;
-  const task = _betWriteChain.then(run, run);
-  _betWriteChain = task.catch(() => {});
-  return task.finally(() => {
-    if (generation !== _betWriteGeneration) return;
-    if (key == null) {
-      _clearWritePending = Math.max(0, _clearWritePending - 1);
-    } else {
-      const remaining = (_pendingBetWrites.get(key) || 1) - 1;
-      if (remaining > 0) _pendingBetWrites.set(key, remaining);
-      else _pendingBetWrites.delete(key);
-    }
+function betBooksEqual(left, right) {
+  const leftEntries = Object.entries(left || {});
+  const rightKeys = Object.keys(right || {});
+  if (leftEntries.length !== rightKeys.length) return false;
+  return leftEntries.every(([key, bet]) => {
+    const other = right?.[key];
+    return other && bet.type === other.type && (bet.target ?? null) === (other.target ?? null) &&
+      bet.chips === other.chips;
   });
 }
 
-function reconcileLocalBets(serverBook, preservePending = false) {
-  const reconciled = {};
-  if (_clearWritePending === 0) {
-    Object.entries(serverBook || {}).forEach(([key, bet]) => {
-      if (Number.isSafeInteger(bet?.chips) && bet.chips > 0) reconciled[key] = bet.chips;
-    });
-  }
-  if (preservePending) {
-    Object.entries(localBets).forEach(([key, chips]) => {
-      if (chips > 0 && isBetWritePending(key)) reconciled[key] = chips;
-    });
-  }
-  localBets = reconciled;
-  renderBetBoard();
+function initializeBettingBook(serverBook) {
+  draftGeneration += 1;
+  committedBets = normalizeBetBook(serverBook);
+  draftBets = cloneBetBook(committedBets);
+  draftDirty = false;
+  betsConfirmed = Object.keys(committedBets).length > 0;
+  submitInFlight = false;
+  submitError = '';
 }
 
-function scheduleBetWrite(key, type, target) {
-  if (!activeBetAuthority) return;
-  if (_betWriteTimers.has(key)) clearTimeout(_betWriteTimers.get(key));
-  const authority = { ...activeBetAuthority };
-  const timer = setTimeout(() => {
-    _betWriteTimers.delete(key);
-    const targetRoom = roomCode;
-    const targetPlayer = playerIndex;
-    const chips = localBets[key] || 0;
-    if (targetRoom == null || targetPlayer == null) return;
+function discardDraftState() {
+  draftGeneration += 1;
+  committedBets = {};
+  draftBets = {};
+  draftDirty = false;
+  betsConfirmed = false;
+  submitInFlight = false;
+  submitError = '';
+  activeBetAuthority = null;
+}
 
-    void enqueueBetMutation(key, async () => {
-      const game = firebaseSnapshot.game || {};
-      if (game.phase !== 'betting' || game.roundNumber !== authority.roundNumber ||
-          game.revision !== authority.revision) {
-        reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {}, true);
-        return;
-      }
-      try {
-        const result = await writeBet(
-          targetRoom, targetPlayer, key,
-          chips > 0 ? { type, target, chips } : null,
-          authority,
-        );
-        if (activeBetAuthority?.roundNumber === authority.roundNumber &&
-            activeBetAuthority?.revision === authority.revision) {
-          reconcileLocalBets(result.playerBets, true);
-        }
-      } catch (err) {
-        const stillCurrent = activeBetAuthority?.roundNumber === authority.roundNumber &&
-          activeBetAuthority?.revision === authority.revision;
-        if (!stillCurrent) return;
-        cancelPendingBetWrites();
-        reconcileLocalBets((firebaseSnapshot.bets || {})[`player_${targetPlayer}`] || {});
-        showToast('Bet was rejected; your chips were reconciled.');
-        console.warn('writeBet rejected:', err.message);
-      }
-    });
-  }, 220);
-  _betWriteTimers.set(key, timer);
+function authorityMatches(authority) {
+  const game = firebaseSnapshot.game || {};
+  return !!authority && !!activeBetAuthority && game.phase === 'betting' &&
+    authority.roundNumber === activeBetAuthority.roundNumber &&
+    authority.revision === activeBetAuthority.revision &&
+    game.roundNumber === authority.roundNumber && game.revision === authority.revision;
+}
+
+function bettingIsOpen() {
+  if (!authorityMatches(activeBetAuthority)) return false;
+  const closeAt = firebaseSnapshot.game?.betsCloseAt;
+  return closeAt == null || serverNow() < closeAt;
+}
+
+function canEditDraft() {
+  const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
+  return bettingIsOpen() && !betsConfirmed && !submitInFlight && !!me &&
+    !me.broke && Number.isSafeInteger(me.chips) && me.chips > 0;
+}
+
+function canConfirmDraft() {
+  return canEditDraft() && draftDirty && totalDraft() > 0;
 }
 
 /**
@@ -624,8 +599,9 @@ function renderBetBoard() {
   if (!board || !board.dataset._built) return;
 
   const status = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
-  const isBetting = status === 'betting';
-  board.classList.toggle('locked', !isBetting);
+  const editable = canEditDraft();
+  board.classList.toggle('locked', !editable);
+  board.setAttribute('aria-disabled', editable ? 'false' : 'true');
   // Player tag
   renderPlayerTag();
 
@@ -635,7 +611,7 @@ function renderBetBoard() {
     const targetRaw = cell.dataset.betTarget;
     const target = targetRaw == null || targetRaw === '' ? null : parseInt(targetRaw, 10);
     const key = betKey(type, target);
-    const chips = key ? (localBets[key] || 0) : 0;
+    const chips = key ? (draftBets[key]?.chips || 0) : 0;
     const existingTag = cell.querySelector('.felt-chip-stack');
     if (chips > 0) {
       const html = `<span class="felt-chip-stack">${chips}</span>`;
@@ -662,18 +638,15 @@ function renderBetBoard() {
   if (tray) {
     const me = (firebaseSnapshot.players || {})[`player_${playerIndex}`];
     const balance = Number(me?.chips) || 0;
-    const total = totalLocal();
+    const total = totalDraft();
     const left = Math.max(0, balance - total);
-    // Itemized ledger: short label per bet + chip count, plus total/balance
-    // pinned to the right. Empty state shows just the balance. The bet count
-    // pill shows N bets at a glance so the player always knows their action.
     const items = [];
     let count = 0;
-    Object.keys(localBets).forEach((k) => {
-      const chips = localBets[k];
+    Object.keys(draftBets).forEach((key) => {
+      const chips = draftBets[key]?.chips;
       if (!chips) return;
       count += 1;
-      items.push(`<span class="ledger-item">${labelForBetKey(k)} <strong>${chips}</strong></span>`);
+      items.push(`<span class="ledger-item">${labelForBetKey(key)} <strong>${chips}</strong></span>`);
     });
     if (items.length === 0) {
       tray.innerHTML = `<span class="ledger-balance">💰 ${balance}</span>`;
@@ -684,11 +657,43 @@ function renderBetBoard() {
         <span class="ledger-summary">Bet ${total} · Left ${left}</span>`;
     }
   }
+  renderBetControls();
 }
 
-/** Snapshots local bets to a parallel store so the result panel can keep
- *  showing them after the round transitions or Firebase clears them. Called
- *  the moment the meta status flips to 'spinning'. */
+function renderBetControls() {
+  const clearButton = document.getElementById('btn-phone-clear-bets');
+  const confirmButton = document.getElementById('btn-phone-confirm-bets');
+  const statusElement = document.getElementById('phone-bet-status');
+  if (!clearButton || !confirmButton || !statusElement) return;
+
+  clearButton.disabled = !canEditDraft() || totalDraft() === 0;
+  confirmButton.disabled = !canConfirmDraft();
+  confirmButton.classList.toggle('submitting', submitInFlight);
+  confirmButton.classList.toggle('confirmed', betsConfirmed);
+  confirmButton.textContent = submitInFlight ? 'Submitting…' : betsConfirmed ? 'Confirmed' : 'Confirm Bets';
+
+  let message = 'Draft not submitted — tap the felt to add +100';
+  let state = 'draft';
+  if (submitInFlight) {
+    message = 'Submitting…';
+    state = 'submitting';
+  } else if (betsConfirmed) {
+    message = 'Confirmed — bets locked for this round';
+    state = 'confirmed';
+  } else if (submitError) {
+    message = submitError;
+    state = 'failed';
+  } else if (!bettingIsOpen()) {
+    message = 'Failed/closed — betting is closed';
+    state = 'failed';
+  } else if (draftDirty) {
+    message = 'Draft not submitted';
+  }
+  statusElement.textContent = message;
+  statusElement.className = `phone-bet-status ${state}`;
+}
+
+/** Snapshots only host-locked bets for the result panel. */
 function snapshotLastRoundBets() {
   const game = firebaseSnapshot.game || {};
   const roundKey = `${game.roundNumber}:${game.revision}`;
@@ -703,23 +708,6 @@ function snapshotLastRoundBets() {
     lastRoundBets[key] = bet.chips;
     lastRoundBetObjects.push({ type: bet.type, target: bet.target ?? null, chips: bet.chips });
   });
-  localBets = { ...lastRoundBets };
-}
-
-/** Reverses betKey() — returns {type, target} for a stored bet key. */
-function parseBetKey(key) {
-  if (key.startsWith('s-')) return { type: BET_TYPES.STRAIGHT, target: parseInt(key.slice(2), 10) };
-  if (key.startsWith('d-')) return { type: BET_TYPES.DOZEN,    target: parseInt(key.slice(2), 10) };
-  if (key.startsWith('c-')) return { type: BET_TYPES.COLUMN,   target: parseInt(key.slice(2), 10) };
-  switch (key) {
-    case 'red':   return { type: BET_TYPES.RED,   target: null };
-    case 'black': return { type: BET_TYPES.BLACK, target: null };
-    case 'even':  return { type: BET_TYPES.EVEN,  target: null };
-    case 'odd':   return { type: BET_TYPES.ODD,   target: null };
-    case 'low':   return { type: BET_TYPES.LOW,   target: null };
-    case 'high':  return { type: BET_TYPES.HIGH,  target: null };
-    default:      return { type: null, target: null };
-  }
 }
 
 /**
@@ -927,6 +915,7 @@ function startCountdownDisplay() {
       return;
     }
     renderHeader();
+    renderBetBoard();
   }, 250);
 }
 
@@ -961,7 +950,7 @@ function showHelpModal() {
 function cleanupAndGoHome() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (_phoneCountdownTimer) { clearInterval(_phoneCountdownTimer); _phoneCountdownTimer = null; }
-  cancelPendingBetWrites();
+  discardDraftState();
   if (cancelPlayerDisconnect) { void cancelPlayerDisconnect(); cancelPlayerDisconnect = null; }
   dismissConfirmModals();
   const helpModal = document.getElementById('help-modal');
@@ -971,7 +960,6 @@ function cleanupAndGoHome() {
   playerIndex = null;
   firebaseSnapshot = {};
   previousPlayers = {};
-  localBets = {};
   lastRoundBets = {};
   lastRoundBetObjects = [];
   activeBetAuthority = null;

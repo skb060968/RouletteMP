@@ -873,7 +873,7 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   gap: 4px;
   font-family: 'Cinzel', serif;
 }
-.phone-bet-board.locked { filter: brightness(0.65); }
+.phone-bet-board.locked { filter: brightness(0.65); pointer-events: none; }
 
 .felt-row { display: flex; gap: 4px; }
 .felt-row-numbers { display: flex; gap: 4px; align-items: stretch; }
@@ -1067,38 +1067,66 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
-/* CHIP DENOMINATIONS ROW */
-.phone-chip-row {
-  display: flex;
-  gap: 6px;
+/* LOCAL DRAFT ACTIONS */
+.phone-bet-actions {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) auto minmax(130px, 1.2fr);
+  gap: 8px;
   width: 100%;
   max-width: 480px;
-  justify-content: center;
+  align-items: stretch;
 }
-.chip-btn {
-  width: 50px; height: 50px;
-  border-radius: 50%;
-  border: 3px solid #8b7000;
-  background: linear-gradient(180deg, #ffefb0, #c9a200);
-  color: #2c1810;
+.bet-increment-indicator,
+.bet-action-btn {
+  min-height: 48px;
+  border-radius: 12px;
   font-weight: 900;
   font-size: 0.9rem;
-  cursor: pointer;
-  user-select: none;
-  transition: transform 0.12s, border-color 0.15s;
 }
-.chip-btn:hover { transform: scale(1.06); }
-.chip-btn.selected {
-  border-color: #fff;
-  box-shadow: 0 0 0 3px #ffd700, 0 0 12px rgba(255, 215, 0, 0.6);
-  transform: scale(1.1);
+.bet-increment-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  color: #2c1810;
+  background: linear-gradient(180deg, #ffefb0, #c9a200);
+  border: 2px solid #8b7000;
+  text-align: center;
 }
-.chip-btn.clear {
-  background: linear-gradient(180deg, #e74c3c, #922b21);
+.bet-action-btn {
+  padding: 8px 14px;
+  border: 2px solid transparent;
   color: #fff;
-  border-color: #5b1c14;
-  font-size: 0.75rem;
+  cursor: pointer;
+  transition: transform 0.12s, filter 0.15s, opacity 0.15s;
 }
+.bet-action-btn:not(:disabled):hover { filter: brightness(1.08); }
+.bet-action-btn:not(:disabled):active { transform: translateY(2px); }
+.bet-action-btn.clear {
+  background: linear-gradient(180deg, #e74c3c, #922b21);
+  border-color: #5b1c14;
+}
+.bet-action-btn.confirm {
+  background: linear-gradient(180deg, #2ecc71, #187a42);
+  border-color: #0c4d28;
+  box-shadow: 0 3px 0 #0c4d28;
+}
+.bet-action-btn.confirm.submitting { background: linear-gradient(180deg, #d4a017, #8b6508); }
+.bet-action-btn.confirm.confirmed { background: linear-gradient(180deg, #2980b9, #174e73); }
+.bet-action-btn:disabled { opacity: 0.48; cursor: not-allowed; filter: grayscale(0.35); box-shadow: none; }
+.phone-bet-status {
+  width: 100%;
+  max-width: 480px;
+  min-height: 1.3em;
+  margin: -2px 0 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: center;
+}
+.phone-bet-status.draft { color: #ffe680; }
+.phone-bet-status.submitting { color: #ffd166; }
+.phone-bet-status.confirmed { color: #7bed9f; }
+.phone-bet-status.failed { color: #ff8a80; }
 
 .phone-tray-row {
   display: flex;
@@ -1437,5 +1465,20 @@ input:focus-visible,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Local-draft controls stay thumb-friendly on narrow phones. */
+@media (max-width: 420px) {
+  .phone-bet-actions {
+    grid-template-columns: 1fr 0.72fr;
+  }
+  .bet-increment-indicator {
+    grid-column: 1 / -1;
+    min-height: 38px;
+  }
+  .bet-action-btn {
+    min-height: 46px;
+    padding-inline: 8px;
   }
 }

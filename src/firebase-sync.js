@@ -456,41 +456,28 @@ async function playerBetTransaction(roomCode, playerIndex, authority, mutate) {
   return { playerBets: result.snapshot.val() || {}, game: room.game };
 }
 
-export async function writeBet(roomCode, playerIndex, key, payload, authority) {
-  return playerBetTransaction(roomCode, playerIndex, authority, (book, balance) => {
-    const nextBook = { ...book };
-    if (!payload || payload.chips === 0) {
-      delete nextBook[key];
-    } else {
-      const stored = {
-        type: payload.type,
-        target: payload.target ?? null,
-        chips: payload.chips,
-        roundNumber: authority.roundNumber,
-        revision: authority.revision,
-      };
-      if (!validateStoredBet(key, stored, authority)) throw failure('Malformed bet');
-      nextBook[key] = stored;
+export async function replacePlayerBets(roomCode, playerIndex, draftBook, authority) {
+  return playerBetTransaction(roomCode, playerIndex, authority, (_book, balance) => {
+    if (!draftBook || typeof draftBook !== 'object' || Array.isArray(draftBook)) {
+      throw failure('Malformed bet book');
     }
+    const normalized = {};
     let total = 0;
-    for (const [storedKey, storedBet] of Object.entries(nextBook)) {
-      if (!validateStoredBet(storedKey, storedBet, authority)) throw failure('Malformed bet book');
-      total += storedBet.chips;
+    for (const [key, draftBet] of Object.entries(draftBook)) {
+      const stored = {
+        type: draftBet?.type,
+        target: draftBet?.target ?? null,
+        chips: draftBet?.chips,
+        roundNumber: authority?.roundNumber,
+        revision: authority?.revision,
+      };
+      if (!validateStoredBet(key, stored, authority)) throw failure('Malformed bet book');
+      total += stored.chips;
       if (!Number.isSafeInteger(total)) throw failure('Unsafe aggregate bet value');
+      normalized[key] = stored;
     }
     if (total > balance) throw failure('Aggregate bets exceed balance');
-    return Object.keys(nextBook).length ? nextBook : null;
-  });
-}
-
-export async function clearPlayerBets(roomCode, playerIndex, authority) {
-  return playerBetTransaction(roomCode, playerIndex, authority, (book) => {
-    for (const [storedKey, storedBet] of Object.entries(book)) {
-      if (!validateStoredBet(storedKey, storedBet, authority)) {
-        throw failure('Betting authority expired');
-      }
-    }
-    return null;
+    return Object.keys(normalized).length ? normalized : null;
   });
 }
 

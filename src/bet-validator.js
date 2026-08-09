@@ -17,6 +17,7 @@ export const BET_TYPES = Object.freeze({
   COLUMN: 'column',
 });
 
+export const BET_INCREMENT = 100;
 export const MAX_BET_CHIPS = 1_000_000;
 
 const PAYOUT_MULTIPLIER = Object.freeze({
@@ -56,7 +57,8 @@ export function betKey(type, target) {
 
 export function validateBet(bet) {
   if (!bet || typeof bet !== 'object' || Array.isArray(bet)) return false;
-  if (!Number.isSafeInteger(bet.chips) || bet.chips <= 0 || bet.chips > MAX_BET_CHIPS) {
+  if (!Number.isSafeInteger(bet.chips) || bet.chips <= 0 ||
+      bet.chips % BET_INCREMENT !== 0 || bet.chips > MAX_BET_CHIPS) {
     return false;
   }
   const { type, target } = bet;
