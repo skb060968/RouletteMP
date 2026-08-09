@@ -1070,30 +1070,17 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
 /* LOCAL DRAFT ACTIONS */
 .phone-bet-actions {
   display: grid;
-  grid-template-columns: minmax(110px, 1fr) auto minmax(130px, 1.2fr);
+  grid-template-columns: 1fr 1.35fr;
   gap: 8px;
   width: 100%;
   max-width: 480px;
   align-items: stretch;
 }
-.bet-increment-indicator,
 .bet-action-btn {
   min-height: 48px;
   border-radius: 12px;
   font-weight: 900;
   font-size: 0.9rem;
-}
-.bet-increment-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 10px;
-  color: #2c1810;
-  background: linear-gradient(180deg, #ffefb0, #c9a200);
-  border: 2px solid #8b7000;
-  text-align: center;
-}
-.bet-action-btn {
   padding: 8px 14px;
   border: 2px solid transparent;
   color: #fff;
@@ -1118,7 +1105,8 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
   width: 100%;
   max-width: 480px;
   min-height: 1.3em;
-  margin: -2px 0 0;
+  margin: 0;
+  padding: 2px 4px;
   font-size: 0.82rem;
   font-weight: 800;
   text-align: center;
@@ -1187,6 +1175,7 @@ body[data-mode="phone"] .screen { max-width: 480px; margin: 0 auto; }
 /* ======= ROUND RESULT PANEL =======
  * Replaces the bet board during the spin + reveal so the player can read
  * back exactly what they staked and how each bet settled. */
+.phone-result-panel[hidden] { display: none !important; }
 .phone-result-panel {
   position: relative;
   width: 100%;
@@ -1471,11 +1460,7 @@ input:focus-visible,
 /* Local-draft controls stay thumb-friendly on narrow phones. */
 @media (max-width: 420px) {
   .phone-bet-actions {
-    grid-template-columns: 1fr 0.72fr;
-  }
-  .bet-increment-indicator {
-    grid-column: 1 / -1;
-    min-height: 38px;
+    grid-template-columns: 0.8fr 1.2fr;
   }
   .bet-action-btn {
     min-height: 46px;

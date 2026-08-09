@@ -672,7 +672,7 @@ function renderBetControls() {
   confirmButton.classList.toggle('confirmed', betsConfirmed);
   confirmButton.textContent = submitInFlight ? 'Submitting…' : betsConfirmed ? 'Confirmed' : 'Confirm Bets';
 
-  let message = 'Draft not submitted — tap the felt to add +100';
+  let message = 'Start betting by tapping the board (+100 each tap)';
   let state = 'draft';
   if (submitInFlight) {
     message = 'Submitting…';
@@ -687,7 +687,7 @@ function renderBetControls() {
     message = 'Failed/closed — betting is closed';
     state = 'failed';
   } else if (draftDirty) {
-    message = 'Draft not submitted';
+    message = 'Draft ready — select Confirm Bets';
   }
   statusElement.textContent = message;
   statusElement.className = `phone-bet-status ${state}`;
