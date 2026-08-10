@@ -192,6 +192,7 @@ function setupServiceWorker() {
   const toast = document.getElementById('updateToast');
   const reloadButton = document.getElementById('btn-update-reload');
   const laterButton = document.getElementById('btn-update-later');
+  const updateMessage = document.getElementById('update-toast-message');
 
   const showUpdateToast = (worker) => {
     waitingWorker = worker;
@@ -205,7 +206,23 @@ function setupServiceWorker() {
     if (!waitingWorker || updateApproved) return;
     updateApproved = true;
     reloadButton.disabled = true;
-    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    reloadButton.textContent = 'Updating…';
+    reloadButton.setAttribute('aria-busy', 'true');
+    if (laterButton) laterButton.disabled = true;
+    if (updateMessage) updateMessage.textContent = 'Applying update… The app will reload automatically.';
+    if (toast) toast.setAttribute('aria-busy', 'true');
+    try {
+      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    } catch (error) {
+      updateApproved = false;
+      reloadButton.disabled = false;
+      reloadButton.textContent = 'Try again';
+      reloadButton.removeAttribute('aria-busy');
+      if (laterButton) laterButton.disabled = false;
+      if (updateMessage) updateMessage.textContent = 'Update could not start. Please try again.';
+      if (toast) toast.removeAttribute('aria-busy');
+      console.warn('Could not activate the update:', error);
+    }
   });
   laterButton?.addEventListener('click', hideUpdateToast);
 
