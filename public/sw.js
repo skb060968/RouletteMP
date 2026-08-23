@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v61';
+const CACHE_VERSION = 'v63';
 const CACHE_NAME = `roulette-mp-${CACHE_VERSION}`;
 const APP_SHELL = '/index.html';
 const STATIC_ASSETS = [
@@ -103,6 +103,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
   if (request.headers.has('Range')) {
     event.respondWith(respondToRangeRequest(request));
     return;

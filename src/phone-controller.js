@@ -19,11 +19,14 @@ import { colorOf } from './wheel.js';
 import { initAudio, playSound, isMuted, toggleMute } from './sound-manager.js';
 import { showScreen, showToast, dismissConfirmModals } from './platform-ui.js';
 import { ROOM_CODE_PATTERN } from './deep-link-handler.js';
+import { authReady } from './firebase-config.js';
+import { mountVoiceChat } from './voice-chat-widget.js';
 
 const SESSION_KEY = 'roulette_mp_session';
 
 let roomCode = null;
 let playerIndex = null;
+let voiceWidget = null;
 let unsubscribe = null;
 let cancelPlayerDisconnect = null;
 let firebaseSnapshot = {};
@@ -340,6 +343,19 @@ function wirePhoneGame() {
     muteBtn.addEventListener('click', () => {
       toggleMute();
       muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+    });
+  }
+
+  // Optional voice chat (players only; host uses the TV screen).
+  if (!voiceWidget) {
+    voiceWidget = mountVoiceChat({
+      mount: '#voice-widget',
+      game: 'roulette',
+      getRoomCode: () => roomCode,
+      getIdentity: () => (playerIndex != null ? `player_${playerIndex}` : null),
+      getDisplayName: () => (firebaseSnapshot.players || {})[`player_${playerIndex}`]?.name || 'Player',
+      getIdToken: async () => (await authReady).getIdToken(),
+      notify: (message) => showToast(message),
     });
   }
   const clearBtn = document.getElementById('btn-phone-clear-bets');
@@ -948,6 +964,7 @@ function showHelpModal() {
 
 /* ======= CLEANUP ======= */
 function cleanupAndGoHome() {
+  if (voiceWidget) { try { voiceWidget.stop(); } catch (_) {} }
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (_phoneCountdownTimer) { clearInterval(_phoneCountdownTimer); _phoneCountdownTimer = null; }
   discardDraftState();
