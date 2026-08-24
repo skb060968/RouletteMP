@@ -26,7 +26,12 @@ import { createLiveKitVoice } from './voice-livekit.js';
 
 const STYLE_ID = 'voice-chat-widget-styles';
 const STYLES = `
-.vcw { display: inline-flex; align-items: center; gap: 6px; }
+.vcw {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
 .vcw-join {
   border: 0; border-radius: 999px; padding: 7px 12px;
   background: #fff; color: #14213d; font: inherit; font-size: 0.82rem;
@@ -80,7 +85,7 @@ export function mountVoiceChat(config = {}) {
       ? '🎙️ Voice'
       : state === 'connecting' ? '🎙️ …' : '🎧 Leave';
     const muted = Boolean(status?.muted);
-    muteBtn.textContent = muted ? '🔇' : '🎤';
+    muteBtn.textContent = muted ? '🤐' : '🎤';
     muteBtn.classList.toggle('muted', muted);
     if (state === 'error' && status.message) notify?.(status.message);
     else if (state === 'needs-audio-unlock') notify?.('Tap 🎤 to enable voice audio');
