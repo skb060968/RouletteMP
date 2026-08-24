@@ -83,7 +83,17 @@ export async function resumePhoneSession(savedRoomCode, savedPlayerIndex) {
   roomCode = savedRoomCode;
   playerIndex = savedPlayerIndex;
   const result = await rejoinRoom(savedRoomCode, savedPlayerIndex, 'phone');
-  if (!result.success) { clearSession(); showScreen('home'); return; }
+  if (!result.success) {
+    console.warn('[resume] rejoin failed:', result.reason);
+    clearSession();
+    showScreen('home');
+    const status = document.getElementById('app-status');
+    if (status) {
+      status.textContent = `Could not resume your room: ${result.reason || 'unknown'}.`;
+      status.hidden = false;
+    }
+    return;
+  }
   cancelPlayerDisconnect = setupPlayerDisconnectHandler(roomCode, playerIndex);
   attachRoomListener();
   if (result.status === 'lobby') showScreen('phone-lobby');
