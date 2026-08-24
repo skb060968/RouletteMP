@@ -211,9 +211,13 @@ export async function rejoinRoom(roomCode, playerIndex, role) {
   if (!PLAYER_KEY.test(playerKey) || room.players?.[playerKey]?.uid !== uid) {
     return { success: false, reason: 'Player session does not own this slot' };
   }
+  // Ownership is verified above, so mark reconnected unconditionally. Returning
+  // `undefined` here (the previous `connected == null ? undefined : true`) aborted
+  // the transaction on the initial locally-cached null pass after a page refresh,
+  // before the server value was ever consulted — which broke rejoin-on-refresh.
   const result = await firebaseRetry(() => runTransaction(
     ref(db, `${ROOM_PATH}/${roomCode}/players/${playerKey}/connected`),
-    (connected) => connected == null ? undefined : true,
+    () => true,
     { applyLocally: false },
   ));
   if (!result.committed) return { success: false, reason: 'Player session could not reconnect' };
