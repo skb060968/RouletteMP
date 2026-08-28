@@ -1,7 +1,7 @@
 /** Authenticated, transactional Firebase synchronization for Roulette MP. */
 import { db, auth, authReady } from './firebase-config.js';
 import {
-  ref, get, onValue, off, onDisconnect, runTransaction,
+  ref, get, set, onValue, off, onDisconnect, runTransaction,
 } from 'firebase/database';
 import { validateStoredBet } from './bet-validator.js';
 import { resolveRound, STARTING_CHIPS, TOP_UP_AMOUNT } from './game-engine.js';
@@ -577,17 +577,29 @@ export function setupTvDisconnectHandler(roomCode) {
 
 export function setupPlayerDisconnectHandler(roomCode, playerIndex) {
   const playerPath = `${ROOM_PATH}/${roomCode}/players/player_${playerIndex}`;
+  const connectedRef = ref(db, `${playerPath}/connected`);
+  const infoRef = ref(db, '.info/connected');
   let registration = null;
-  const registered = (async () => {
-    const { uid } = await requireUser();
-    const snapshot = await get(ref(db, playerPath));
-    if (snapshot.val()?.uid !== uid) throw failure('Player slot ownership failed');
-    registration = onDisconnect(ref(db, `${playerPath}/connected`));
-    await registration.set(false);
-  })();
-  registered.catch((err) => console.warn('Player onDisconnect failed:', err.message));
+  let disposed = false;
+  // Re-arm the offline write and self-heal `connected=true` every time the
+  // socket (re)connects, so a brief drop that fired onDisconnect is undone.
+  const handler = async (snapshot) => {
+    if (!snapshot.val() || disposed) return;
+    try {
+      const { uid } = await requireUser();
+      const owner = await get(ref(db, playerPath));
+      if (owner.val()?.uid !== uid) return;
+      registration = onDisconnect(connectedRef);
+      await registration.set(false);
+      if (!disposed) await set(connectedRef, true);
+    } catch (err) {
+      if (!disposed) console.warn('Player onDisconnect failed:', err.message);
+    }
+  };
+  onValue(infoRef, handler);
   return async () => {
-    try { await registered; } catch (_) { return; }
+    disposed = true;
+    off(infoRef, 'value', handler);
     if (registration) {
       try { await registration.cancel(); } catch (_) {}
     }

@@ -33,6 +33,12 @@ let _spinInFlight = false;
 let _createInFlight = false;
 const _delayedTimers = new Map();
 
+/* Lobby presence: a dropped player lingers briefly with the OFFLINE treatment,
+   then is pruned from the TV list. The counter and Start count only connected. */
+const LOBBY_PRUNE_DELAY_MS = 2500;
+let lobbyDisconnectedSince = {};
+let lobbyPruneTimer = null;
+
 function delayed(ms, callback) {
   const id = setTimeout(() => {
     _delayedTimers.delete(id);
@@ -245,14 +251,54 @@ function setupLobbyUi() {
   renderLobbyUi();
 }
 
+/** All named players, in slot order (ghost slots without a name excluded). */
+function lobbyPlayerKeys() {
+  const players = firebaseSnapshot.players || {};
+  return Object.keys(players).filter((k) => players[k] && players[k].name).sort();
+}
+
+/** Named players still connected — the roster the counter and Start button use. */
+function connectedLobbyKeys() {
+  const players = firebaseSnapshot.players || {};
+  return lobbyPlayerKeys().filter((k) => players[k]?.connected !== false);
+}
+
+/** Track when each player first went offline so a dropped row can linger with
+    the OFFLINE treatment and then be pruned. */
+function trackLobbyDisconnections() {
+  const players = firebaseSnapshot.players || {};
+  const stamp = Date.now();
+  const next = {};
+  let pruneNeeded = false;
+  lobbyPlayerKeys().forEach((k) => {
+    if (players[k]?.connected === false) {
+      next[k] = lobbyDisconnectedSince[k] || stamp;
+      if (stamp - next[k] < LOBBY_PRUNE_DELAY_MS) pruneNeeded = true;
+    }
+  });
+  lobbyDisconnectedSince = next;
+  if (!pruneNeeded || lobbyPruneTimer !== null) return;
+  lobbyPruneTimer = setTimeout(() => {
+    lobbyPruneTimer = null;
+    renderLobbyUi();
+  }, LOBBY_PRUNE_DELAY_MS);
+}
+
+/** Whether a player row still belongs in the lobby list. */
+function isLobbyKeyVisible(k) {
+  const players = firebaseSnapshot.players || {};
+  if (players[k]?.connected !== false) return true;
+  const since = lobbyDisconnectedSince[k];
+  return typeof since === 'number' && Date.now() - since < LOBBY_PRUNE_DELAY_MS;
+}
+
 function renderLobbyUi() {
   const list = document.getElementById('tv-lobby-players');
   if (!list) return;
   const players = firebaseSnapshot.players || {};
-  // Skip ghost slots (no name) — these can be left behind by a stale
-  // onDisconnect after a player tapped Leave; they get cleaned up on the
-  // next join, but we filter here so they don't render in the meantime.
-  const keys = Object.keys(players).filter((k) => players[k] && players[k].name).sort();
+  trackLobbyDisconnections();
+  // Skip ghost slots (no name) and prune players offline past the linger window.
+  const keys = lobbyPlayerKeys().filter(isLobbyKeyVisible);
   list.innerHTML = '';
   if (keys.length === 0) {
     const empty = document.createElement('li');
@@ -296,12 +342,13 @@ function renderLobbyUi() {
       list.appendChild(li);
     });
   }
+  const connectedKeys = connectedLobbyKeys();
   const startBtn = document.getElementById('btn-tv-start-round');
-  // Need at least 1 player AND someone with chips
-  const hasReady = keys.some((k) => (players[k]?.chips ?? 0) > 0);
+  // Need at least one CONNECTED player who has chips.
+  const hasReady = connectedKeys.some((k) => (players[k]?.chips ?? 0) > 0);
   if (startBtn) startBtn.disabled = !hasReady;
   const countEl = document.getElementById('tv-lobby-count');
-  if (countEl) countEl.textContent = `${keys.length} / ${MAX_PLAYERS}`;
+  if (countEl) countEl.textContent = `${connectedKeys.length} / ${MAX_PLAYERS}`;
 }
 
 function wireTvLobby() {
@@ -366,7 +413,7 @@ async function startRound() {
   const phase = firebaseSnapshot.game?.phase || firebaseSnapshot.meta?.status;
   if (phase !== 'lobby' && phase !== 'payout') return;
   const players = firebaseSnapshot.players || {};
-  const hasAny = Object.values(players).some((p) => Number.isSafeInteger(p?.chips) && p.chips > 0);
+  const hasAny = Object.values(players).some((p) => p?.connected !== false && Number.isSafeInteger(p?.chips) && p.chips > 0);
   if (!hasAny) {
     showToast('No players have chips. Top Up first.');
     return;
