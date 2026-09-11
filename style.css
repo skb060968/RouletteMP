@@ -47,7 +47,7 @@ body {
 /* ======= 3) BUTTONS ======= */
 .btn {
   width: 100%;
-  max-width: 320px;
+  max-width: 340px;
   padding: 12px 16px;
   border-radius: 14px;
   font-weight: 800;
@@ -124,9 +124,9 @@ body {
 /* ======= 4) FORMS ======= */
 .setup-heading { font-family: Georgia, serif; font-size: 1.4rem; text-align: center; }
 .setup-label { font-size: 0.85rem; opacity: 0.85; text-align: center; }
-.setup-group { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.setup-group { width: 100%; max-width: 380px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .text-input {
-  width: 100%; max-width: 280px;
+  width: 100%; max-width: 340px;
   padding: 10px 14px;
   font-size: 1rem;
   border: 2px solid rgba(255, 255, 255, 0.3);
@@ -143,15 +143,15 @@ body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  max-width: 240px;
+  max-width: 320px;
   justify-items: center;
 }
 /* Avatar tiles — STANDARD glass-tile look (see checklist). */
 .emoji-btn {
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   padding: 0;
-  font-size: 1.6rem;
+  font-size: 1.8rem;
   line-height: 1;
   border: 2px solid rgba(255, 255, 255, 0.35);
   border-radius: 14px;
