@@ -1,3 +1,8 @@
+// On-device diagnostics: records failures to localStorage and adds a 5-tap
+// viewer with a Copy button. Import-only integration; must come first so
+// startup errors are captured too.
+import './diagnostics.js';
+
 import { authReady } from './firebase-config.js';
 import { showScreen } from './platform-ui.js';
 import { startTvFlow, resumeTvSession } from './tv-controller.js';
