@@ -172,7 +172,11 @@ async function init() {
     }
   }
 
-  showScreen('home');
+  // Anonymous sign-in takes a network round-trip on a first visit, and the home
+  // buttons are already live — so the player may have opened Create/Join and
+  // started typing by now. Only fall back to home if they have not moved on;
+  // otherwise this yanked them back mid-word (looked exactly like a refresh).
+  if (!document.querySelector('.screen:not([hidden])') || !document.getElementById('home')?.hasAttribute('hidden')) showScreen('home');
 }
 
 function setupConfettiFallback() {
