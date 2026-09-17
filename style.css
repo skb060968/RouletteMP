@@ -1522,3 +1522,19 @@ input:focus-visible,
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
+
+/* =========================================================
+   DENSE LOBBY (STANDARD, Sep 2026)
+   With 5+ players the list switches to compact rows and scrolls inside a height
+   cap, so the room code and Start / Leave buttons stay on screen on a phone.
+   Driven by the DOM (:has(li:nth-child(5))) — no JS, nothing to keep in sync.
+   ========================================================= */
+.phone-lobby-players:has(li:nth-child(5)) {
+  gap: 4px; padding: 8px;
+  max-height: min(40svh, 340px); overflow-y: auto; overscroll-behavior: contain;
+}
+.phone-lobby-players:has(li:nth-child(5)) .phone-lobby-player { padding: 5px 10px; font-size: 0.92rem; }
+/* TV lobby: three columns once the screen is wide enough, so 12-20 names need less scrolling */
+@media (min-width: 1100px) {
+  .tv-lobby-players { grid-template-columns: repeat(3, 1fr); }
+}
