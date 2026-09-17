@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.2.0';
+const CACHE_VERSION = 'v1.3.0';
 const CACHE_NAME = `roulette-mp-${CACHE_VERSION}`;
 const APP_SHELL = '/index.html';
 const STATIC_ASSETS = [

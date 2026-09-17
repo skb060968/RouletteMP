@@ -44,9 +44,11 @@
     </section>
 
     <section id="tv-create" class="screen tv-create-screen" aria-labelledby="tv-create-heading" hidden>
-      <h2 id="tv-create-heading" class="setup-heading">Host on TV</h2>
-      <button id="btn-tv-create-submit" class="btn primary big" type="button">Create Room</button>
-      <button id="btn-tv-create-back" class="btn secondary back-btn" type="button">← Back</button>
+      <div class="screen-card">
+        <h2 id="tv-create-heading" class="setup-heading">Host on TV</h2>
+        <button id="btn-tv-create-submit" class="btn primary big" type="button">Create Room</button>
+        <button id="btn-tv-create-back" class="btn secondary back-btn" type="button">← Back</button>
+      </div>
     </section>
 
     <section id="tv-lobby" class="screen tv-lobby-screen" aria-labelledby="tv-lobby-title" hidden>
@@ -99,42 +101,46 @@
     </section>
 
     <section id="phone-join" class="screen phone-join-screen" aria-labelledby="phone-join-heading" hidden>
-      <h2 id="phone-join-heading" class="setup-heading">Join Room</h2>
-      <div class="setup-group">
-        <label class="setup-label" for="phone-join-code">Room code</label>
-        <input id="phone-join-code" class="text-input uppercase-input" type="text" maxlength="4" inputmode="text" autocomplete="off" autocapitalize="characters" />
-      </div>
-      <div class="setup-group">
-        <label class="setup-label" for="phone-join-name">Your name</label>
-        <input id="phone-join-name" class="text-input" type="text" maxlength="14" autocomplete="name" />
-      </div>
-      <div class="setup-group">
-        <span id="avatar-picker-label" class="setup-label">Pick an avatar</span>
-        <div class="emoji-picker phone-emoji-picker" role="group" aria-labelledby="avatar-picker-label">
-          <button class="emoji-btn selected" type="button" data-emoji="🥷" aria-label="Choose ninja avatar" aria-pressed="true">🥷</button>
-          <button class="emoji-btn" type="button" data-emoji="🧙" aria-label="Choose mage avatar" aria-pressed="false">🧙</button>
-          <button class="emoji-btn" type="button" data-emoji="🦸" aria-label="Choose superhero avatar" aria-pressed="false">🦸</button>
-          <button class="emoji-btn" type="button" data-emoji="👷" aria-label="Choose builder avatar" aria-pressed="false">👷</button>
-          <button class="emoji-btn" type="button" data-emoji="🤴" aria-label="Choose prince avatar" aria-pressed="false">🤴</button>
-          <button class="emoji-btn" type="button" data-emoji="👸" aria-label="Choose princess avatar" aria-pressed="false">👸</button>
-          <button class="emoji-btn" type="button" data-emoji="🧝" aria-label="Choose elf avatar" aria-pressed="false">🧝</button>
-          <button class="emoji-btn" type="button" data-emoji="🧛" aria-label="Choose vampire avatar" aria-pressed="false">🧛</button>
+      <div class="screen-card">
+        <h2 id="phone-join-heading" class="setup-heading">Join Room</h2>
+        <div class="setup-group">
+          <label class="setup-label" for="phone-join-code">Room code</label>
+          <input id="phone-join-code" class="text-input uppercase-input" type="text" maxlength="4" inputmode="text" autocomplete="off" autocapitalize="characters" />
         </div>
+        <div class="setup-group">
+          <label class="setup-label" for="phone-join-name">Your name</label>
+          <input id="phone-join-name" class="text-input" type="text" maxlength="14" autocomplete="name" />
+        </div>
+        <div class="setup-group">
+          <span id="avatar-picker-label" class="setup-label">Pick an avatar</span>
+          <div class="emoji-picker phone-emoji-picker" role="group" aria-labelledby="avatar-picker-label">
+            <button class="emoji-btn selected" type="button" data-emoji="🥷" aria-label="Choose ninja avatar" aria-pressed="true">🥷</button>
+            <button class="emoji-btn" type="button" data-emoji="🧙" aria-label="Choose mage avatar" aria-pressed="false">🧙</button>
+            <button class="emoji-btn" type="button" data-emoji="🦸" aria-label="Choose superhero avatar" aria-pressed="false">🦸</button>
+            <button class="emoji-btn" type="button" data-emoji="👷" aria-label="Choose builder avatar" aria-pressed="false">👷</button>
+            <button class="emoji-btn" type="button" data-emoji="🤴" aria-label="Choose prince avatar" aria-pressed="false">🤴</button>
+            <button class="emoji-btn" type="button" data-emoji="👸" aria-label="Choose princess avatar" aria-pressed="false">👸</button>
+            <button class="emoji-btn" type="button" data-emoji="🧝" aria-label="Choose elf avatar" aria-pressed="false">🧝</button>
+            <button class="emoji-btn" type="button" data-emoji="🧛" aria-label="Choose vampire avatar" aria-pressed="false">🧛</button>
+          </div>
+        </div>
+        <button id="btn-phone-join-submit" class="btn primary" type="button">Join</button>
+        <button id="btn-phone-join-back" class="btn secondary back-btn" type="button">← Back</button>
       </div>
-      <button id="btn-phone-join-submit" class="btn primary" type="button">Join</button>
-      <button id="btn-phone-join-back" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="phone-lobby" class="screen phone-lobby-screen" aria-labelledby="phone-lobby-title" hidden>
-      <header class="phone-lobby-header">
-        <h2 id="phone-lobby-title" class="phone-lobby-title">Lobby</h2>
-        <button id="btn-phone-lobby-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
-      </header>
-      <p class="phone-room-code-display">Room: <span id="phone-lobby-code">----</span></p>
-      <p class="phone-players-heading">Players <span id="phone-lobby-count" class="phone-players-count">0 / 12</span></p>
-      <ul id="phone-lobby-players" class="phone-lobby-players" aria-live="polite"></ul>
-      <p class="phone-waiting" role="status">Waiting for host to start round…</p>
-      <button id="btn-phone-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+      <div class="screen-card">
+        <header class="phone-lobby-header">
+          <h2 id="phone-lobby-title" class="phone-lobby-title">Lobby</h2>
+          <button id="btn-phone-lobby-mute" class="icon-btn" type="button" aria-label="Mute sounds" aria-pressed="false" title="Mute">🔊</button>
+        </header>
+        <p class="phone-room-code-display">Room: <span id="phone-lobby-code">----</span></p>
+        <p class="phone-players-heading">Players <span id="phone-lobby-count" class="phone-players-count">0 / 12</span></p>
+        <ul id="phone-lobby-players" class="phone-lobby-players" aria-live="polite"></ul>
+        <p class="phone-waiting" role="status">Waiting for host to start round…</p>
+        <button id="btn-phone-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+      </div>
     </section>
 
     <section id="phone-game" class="screen phone-game-screen" aria-label="Roulette game" hidden>
