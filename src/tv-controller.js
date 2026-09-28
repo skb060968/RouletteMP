@@ -1244,10 +1244,13 @@ function renderPlayerStrip() {
       const card = document.createElement('div');
       card.className = 'tv-player-card';
       if (p.broke || (p.chips ?? 0) <= 0) card.classList.add('broke');
-      if (!p.connected) card.classList.add('disconnected');
+      const offline = p.connected === false;
+      if (offline) card.classList.add('disconnected');
+      // An explicit OFF badge: a dimmed card alone reads the same as "broke".
       card.innerHTML = `
         <span class="pc-emoji">${escapeHtml(p.emoji || '😀')}</span>
         <span class="pc-name">${escapeHtml(p.name || 'Player')}</span>
+        ${offline ? '<span class="pc-off" title="Not connected">OFF</span>' : ''}
         <span class="pc-chips">💰 ${p.chips ?? 0}</span>`;
       el.appendChild(card);
     });

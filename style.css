@@ -734,7 +734,13 @@ body[data-mode="tv"] .screen { padding: 24px; max-width: 100%; }
   border: 1px solid rgba(255, 215, 0, 0.2);
 }
 .tv-player-card.broke { opacity: 0.55; border-color: rgba(231, 76, 60, 0.6); }
-.tv-player-card.disconnected { opacity: 0.4; }
+.tv-player-card.disconnected { opacity: 0.55; }
+.tv-player-card .pc-off {
+  flex-shrink: 0;
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em;
+  color: #fff; background: rgba(255, 77, 77, 0.9);
+  padding: 1px 6px; border-radius: 999px;
+}
 .tv-player-card .pc-emoji { font-size: 1.2rem; flex-shrink: 0; }
 .tv-player-card .pc-name {
   flex: 1;
